@@ -9,13 +9,21 @@ const WIDTH = canvas.width;
 const HEIGHT = canvas.height;
 
 const keys = {};
+const pressed = {};
 
 addEventListener("keydown", e => {
+
+    if (!keys[e.code]) {
+        pressed[e.code] = true;
+    }
+
     keys[e.code] = true;
 
     if (
         e.code === "Space" ||
-        e.code === "ArrowUp"
+        e.code === "ArrowUp" ||
+        e.code === "ArrowLeft" ||
+        e.code === "ArrowRight"
     ) {
         e.preventDefault();
     }
@@ -25,128 +33,157 @@ addEventListener("keyup", e => {
     keys[e.code] = false;
 });
 
+
 const world = {
+
+    width: 4300,
+
+    ground: 458,
+
     gravity: 0.72,
-    ground: 455,
+
     cameraX: 0,
-    width: 3900
+
+    shake: 0,
+
+    flash: 0,
+
+    hitStop: 0
 };
 
-const player = {
-    x: 180,
-    y: 340,
 
-    w: 44,
-    h: 92,
+const player = {
+
+    x: 140,
+    y: 350,
+
+    w: 46,
+    h: 96,
 
     vx: 0,
     vy: 0,
 
-    speed: 4.1,
-    jump: 14,
+    speed: 4.4,
+    jump: 14.2,
 
     facing: 1,
 
     grounded: false,
 
-    hp: 100,
-    maxHp: 100,
+    hp: 120,
+    maxHp: 120,
+
+    inv: 0,
+
+    dead: false,
 
     attackTimer: 0,
     attackCooldown: 0,
 
-    hurtTimer: 0,
+    combo: 0,
+    comboWindow: 0,
 
-    dead: false
+    dash: 0,
+    dashCd: 0,
+
+    anim: 0
 };
 
-const enemies = [
 
-    {
-        type: "thug",
-        x: 770,
-        y: 391,
-        w: 42,
-        h: 64,
-        hp: 35,
-        maxHp: 35,
-        speed: 1.25,
-        color: "#657069",
-        alive: true,
-        hurt: 0
-    },
+const enemyDefinitions = [
 
-    {
-        type: "thug",
-        x: 1230,
-        y: 391,
-        w: 42,
-        h: 64,
-        hp: 35,
-        maxHp: 35,
-        speed: 1.35,
-        color: "#6f5e64",
-        alive: true,
-        hurt: 0
-    },
+    ["thug",   760,  38, 1.25],
 
-    {
-        type: "hunter",
-        x: 1740,
-        y: 381,
-        w: 45,
-        h: 74,
-        hp: 50,
-        maxHp: 50,
-        speed: 1.5,
-        color: "#6d6b78",
-        alive: true,
-        hurt: 0
-    },
+    ["thug",  1220,  44, 1.35],
 
-    {
-        type: "thug",
-        x: 2350,
-        y: 391,
-        w: 42,
-        h: 64,
-        hp: 40,
-        maxHp: 40,
-        speed: 1.45,
-        color: "#67675d",
-        alive: true,
-        hurt: 0
-    },
+    ["hunter",1770,  58, 1.55],
 
-    {
-        type: "boss",
-        x: 3190,
-        y: 346,
-        w: 70,
-        h: 109,
-        hp: 160,
-        maxHp: 160,
-        speed: 1.05,
-        color: "#542d32",
-        alive: true,
-        hurt: 0,
-        boss: true
-    }
+    ["thug",  2360,  48, 1.45],
 
+    ["hunter",2730,  60, 1.55],
+
+    ["boss",  3470, 210, 1.05]
 ];
 
-const rain = [];
 
-for (let i = 0; i < 110; i++) {
-    rain.push({
+const enemies = enemyDefinitions.map(
+    ([type, x, hp, speed]) => ({
+
+        type,
+
+        x,
+
+        y:
+            type === "boss"
+                ? 338
+                : type === "hunter"
+                    ? 378
+                    : 392,
+
+        w:
+            type === "boss"
+                ? 76
+                : type === "hunter"
+                    ? 48
+                    : 44,
+
+        h:
+            type === "boss"
+                ? 120
+                : type === "hunter"
+                    ? 78
+                    : 66,
+
+        hp,
+        maxHp: hp,
+
+        speed,
+
+        alive: true,
+
+        hurt: 0,
+
+        cooldown: 0,
+
+        facing: -1,
+
+        boss: type === "boss"
+    })
+);
+
+
+const particles = [];
+
+
+const rain = Array.from(
+    { length: 130 },
+    () => ({
+
         x: Math.random() * WIDTH,
+
         y: Math.random() * HEIGHT,
-        speed: 6 + Math.random() * 8,
-        len: 7 + Math.random() * 12
-    });
+
+        speed:
+            7 +
+            Math.random() * 8,
+
+        len:
+            8 +
+            Math.random() * 11
+    })
+);
+
+
+function clamp(value, min, max) {
+
+    return Math.max(
+        min,
+        Math.min(max, value)
+    );
 }
 
-function rectsOverlap(a, b) {
+
+function overlap(a, b) {
 
     return (
         a.x < b.x + b.w &&
@@ -156,59 +193,292 @@ function rectsOverlap(a, b) {
     );
 }
 
-function attackBox() {
 
-    const reach = 58;
+function pixelRect(
+    x,
+    y,
+    width,
+    height,
+    color
+) {
+
+    ctx.fillStyle = color;
+
+    ctx.fillRect(
+        Math.round(x),
+        Math.round(y),
+        Math.round(width),
+        Math.round(height)
+    );
+}
+
+
+function particleBurst(
+    x,
+    y,
+    amount,
+    type = "blood"
+) {
+
+    for (
+        let i = 0;
+        i < amount;
+        i++
+    ) {
+
+        particles.push({
+
+            x,
+            y,
+
+            vx:
+                (Math.random() - 0.5) *
+                (
+                    type === "spark"
+                        ? 8
+                        : 6
+                ),
+
+            vy:
+                -Math.random() *
+                (
+                    type === "spark"
+                        ? 7
+                        : 5
+                ),
+
+            life:
+                18 +
+                Math.random() * 22,
+
+            maxLife: 40,
+
+            type
+        });
+    }
+}
+
+
+function playerAttackBox() {
+
+    const reach =
+        player.combo === 3
+            ? 76
+            : 62;
 
     return {
-        x:
-            player.facing === 1
-                ? player.x + player.w - 5
-                : player.x - reach + 5,
 
-        y: player.y + 17,
+        x:
+            player.facing > 0
+                ? player.x + player.w - 4
+                : player.x - reach + 4,
+
+        y:
+            player.y + 17,
 
         w: reach,
-        h: 56
+
+        h: 63
     };
 }
 
+
+function attack() {
+
+    if (
+        player.attackCooldown > 0 ||
+        player.dead
+    ) {
+        return;
+    }
+
+    player.combo =
+        player.comboWindow > 0
+            ? player.combo % 3 + 1
+            : 1;
+
+    player.comboWindow = 24;
+
+    player.attackTimer =
+        player.combo === 3
+            ? 15
+            : 11;
+
+    player.attackCooldown =
+        player.combo === 3
+            ? 18
+            : 12;
+
+    const hit = playerAttackBox();
+
+    enemies.forEach(enemy => {
+
+        if (
+            !enemy.alive ||
+            !overlap(hit, enemy)
+        ) {
+            return;
+        }
+
+        const baseDamage =
+            player.combo === 3
+                ? 34
+                : player.combo === 2
+                    ? 24
+                    : 20;
+
+        const damage =
+            enemy.boss
+                ? Math.floor(
+                    baseDamage * 0.72
+                )
+                : baseDamage;
+
+        enemy.hp -= damage;
+
+        enemy.hurt = 10;
+
+        enemy.x +=
+            player.facing *
+            (
+                player.combo === 3
+                    ? 34
+                    : 18
+            );
+
+        world.shake =
+            player.combo === 3
+                ? 9
+                : 5;
+
+        world.flash = 3;
+
+        world.hitStop =
+            player.combo === 3
+                ? 5
+                : 3;
+
+        particleBurst(
+            enemy.x + enemy.w / 2,
+            enemy.y + enemy.h / 2,
+            player.combo === 3
+                ? 14
+                : 8
+        );
+
+        particleBurst(
+            enemy.x + enemy.w / 2,
+            enemy.y + enemy.h / 2,
+            4,
+            "spark"
+        );
+
+        if (enemy.hp <= 0) {
+
+            enemy.alive = false;
+
+            particleBurst(
+                enemy.x + enemy.w / 2,
+                enemy.y + enemy.h / 2,
+                18
+            );
+        }
+    });
+}
+
+
+function dash() {
+
+    if (
+        player.dashCd > 0 ||
+        player.dead
+    ) {
+        return;
+    }
+
+    player.dash = 9;
+
+    player.dashCd = 42;
+
+    player.inv =
+        Math.max(
+            player.inv,
+            12
+        );
+
+    particleBurst(
+        player.x + player.w / 2,
+        player.y + player.h * 0.8,
+        7,
+        "smoke"
+    );
+}
+
+
 function resetGame() {
 
-    player.x = 180;
-    player.y = 340;
+    Object.assign(
+        player,
+        {
+            x: 140,
+            y: 350,
 
-    player.vx = 0;
-    player.vy = 0;
+            vx: 0,
+            vy: 0,
 
-    player.hp = 100;
-    player.dead = false;
+            hp: 120,
+
+            inv: 0,
+
+            dead: false,
+
+            attackTimer: 0,
+
+            attackCooldown: 0,
+
+            combo: 0,
+
+            comboWindow: 0,
+
+            dash: 0,
+
+            dashCd: 0
+        }
+    );
+
+    enemyDefinitions.forEach(
+        ([type, x, hp], index) => {
+
+            Object.assign(
+                enemies[index],
+                {
+                    x,
+
+                    hp,
+
+                    maxHp: hp,
+
+                    alive: true,
+
+                    hurt: 0,
+
+                    cooldown: 0
+                }
+            );
+        }
+    );
 
     world.cameraX = 0;
 
-    const setup = [
-        [770, 35],
-        [1230, 35],
-        [1740, 50],
-        [2350, 40],
-        [3190, 160]
-    ];
-
-    enemies.forEach((enemy, i) => {
-
-        enemy.x = setup[i][0];
-        enemy.hp = setup[i][1];
-
-        enemy.alive = true;
-        enemy.hurt = 0;
-    });
+    particles.length = 0;
 }
+
 
 function updatePlayer() {
 
     if (player.dead) {
 
-        if (keys["KeyR"]) {
+        if (pressed.KeyR) {
             resetGame();
         }
 
@@ -218,136 +488,158 @@ function updatePlayer() {
     let direction = 0;
 
     if (
-        keys["KeyA"] ||
-        keys["ArrowLeft"]
+        keys.KeyA ||
+        keys.ArrowLeft
     ) {
-        direction -= 1;
+        direction--;
     }
 
     if (
-        keys["KeyD"] ||
-        keys["ArrowRight"]
+        keys.KeyD ||
+        keys.ArrowRight
     ) {
-        direction += 1;
+        direction++;
     }
 
-    player.vx += direction * 0.65;
-
-    const maxSpeed =
-        keys["ShiftLeft"]
-            ? player.speed * 1.45
-            : player.speed;
-
-    player.vx = Math.max(
-        -maxSpeed,
-        Math.min(maxSpeed, player.vx)
-    );
-
-    if (direction === 0) {
-        player.vx *= 0.77;
+    if (pressed.KeyJ) {
+        attack();
     }
 
-    if (direction !== 0) {
-        player.facing = Math.sign(direction);
+    if (
+        pressed.KeyK ||
+        pressed.ShiftLeft
+    ) {
+        dash();
+    }
+
+    if (player.dash > 0) {
+
+        player.vx =
+            player.facing *
+            11.5;
+
+        player.dash--;
+    }
+
+    else {
+
+        player.vx +=
+            direction * 0.7;
+
+        player.vx =
+            clamp(
+                player.vx,
+                -player.speed,
+                player.speed
+            );
+
+        if (!direction) {
+            player.vx *= 0.76;
+        }
+
+        if (direction) {
+            player.facing =
+                Math.sign(direction);
+        }
     }
 
     if (
         (
-            keys["Space"] ||
-            keys["KeyW"] ||
-            keys["ArrowUp"]
+            pressed.Space ||
+            pressed.KeyW ||
+            pressed.ArrowUp
         ) &&
         player.grounded
     ) {
 
-        player.vy = -player.jump;
+        player.vy =
+            -player.jump;
+
         player.grounded = false;
     }
 
-    player.vy += world.gravity;
+    player.vy +=
+        world.gravity;
 
-    player.x += player.vx;
-    player.y += player.vy;
+    player.x +=
+        player.vx;
+
+    player.y +=
+        player.vy;
 
     if (
-        player.y + player.h >= world.ground
+        player.y +
+        player.h >=
+        world.ground
     ) {
 
-        player.y = world.ground - player.h;
+        player.y =
+            world.ground -
+            player.h;
 
         player.vy = 0;
+
         player.grounded = true;
     }
 
-    player.x = Math.max(
-        30,
-        Math.min(
-            world.width - player.w - 30,
-            player.x
-        )
-    );
-
-    if (player.attackCooldown > 0) {
-        player.attackCooldown--;
-    }
+    player.x =
+        clamp(
+            player.x,
+            24,
+            world.width -
+            player.w -
+            24
+        );
 
     if (player.attackTimer > 0) {
         player.attackTimer--;
     }
 
-    if (player.hurtTimer > 0) {
-        player.hurtTimer--;
+    if (player.attackCooldown > 0) {
+        player.attackCooldown--;
     }
 
-    if (
-        keys["KeyJ"] &&
-        player.attackCooldown <= 0
-    ) {
-
-        player.attackTimer = 12;
-        player.attackCooldown = 25;
-
-        const hit = attackBox();
-
-        enemies.forEach(enemy => {
-
-            if (
-                enemy.alive &&
-                rectsOverlap(hit, enemy)
-            ) {
-
-                const damage =
-                    enemy.boss
-                        ? 20
-                        : 26;
-
-                enemy.hp -= damage;
-
-                enemy.hurt = 8;
-
-                enemy.x += player.facing * 25;
-
-                if (enemy.hp <= 0) {
-                    enemy.alive = false;
-                }
-            }
-        });
+    if (player.comboWindow > 0) {
+        player.comboWindow--;
     }
+
+    else {
+        player.combo = 0;
+    }
+
+    if (player.inv > 0) {
+        player.inv--;
+    }
+
+    if (player.dashCd > 0) {
+        player.dashCd--;
+    }
+
+    player.anim +=
+        Math.abs(player.vx) *
+        0.08 +
+        0.02;
 
     const cameraTarget =
-        player.x - WIDTH * 0.36;
+        player.x -
+        WIDTH * 0.34;
 
     world.cameraX +=
-        (cameraTarget - world.cameraX) * 0.08;
-
-    world.cameraX = Math.max(
-        0,
-        Math.min(
-            world.width - WIDTH,
+        (
+            cameraTarget -
             world.cameraX
-        )
-    );
+        ) *
+        0.09;
+
+    world.cameraX =
+        clamp(
+            world.cameraX,
+            0,
+            world.width -
+            WIDTH
+        );
 }
+
 
 function updateEnemies() {
 
@@ -365,520 +657,868 @@ function updateEnemies() {
             enemy.hurt--;
         }
 
-        const dx =
-            player.x - enemy.x;
-
-        if (Math.abs(dx) < 450) {
-
-            const dir =
-                Math.sign(dx);
-
-            enemy.x +=
-                dir * enemy.speed;
+        if (enemy.cooldown > 0) {
+            enemy.cooldown--;
         }
 
-        const danger = {
-            x: enemy.x,
-            y: enemy.y,
-            w: enemy.w,
-            h: enemy.h
-        };
+        const dx =
+            player.x -
+            enemy.x;
+
+        enemy.facing =
+            Math.sign(dx) ||
+            enemy.facing;
 
         if (
-            rectsOverlap(player, danger) &&
-            player.hurtTimer <= 0
+            Math.abs(dx) <
+            (
+                enemy.boss
+                    ? 600
+                    : 460
+            ) &&
+            Math.abs(dx) >
+            enemy.w * 0.7 &&
+            enemy.hurt <= 0
         ) {
 
-            player.hp -=
-                enemy.boss
-                    ? 20
-                    : 11;
+            enemy.x +=
+                Math.sign(dx) *
+                enemy.speed;
+        }
 
-            player.hurtTimer = 55;
+        if (
+            overlap(player, enemy) &&
+            enemy.cooldown <= 0 &&
+            player.inv <= 0
+        ) {
+
+            const damage =
+                enemy.boss
+                    ? 24
+                    : enemy.type === "hunter"
+                        ? 15
+                        : 11;
+
+            player.hp -= damage;
+
+            player.inv = 48;
 
             player.vx =
-                Math.sign(player.x - enemy.x) * 8;
+                Math.sign(
+                    player.x -
+                    enemy.x
+                ) *
+                (
+                    enemy.boss
+                        ? 10
+                        : 7
+                );
 
-            player.vy = -6;
+            player.vy = -5;
 
-            if (player.hp <= 0) {
+            enemy.cooldown =
+                enemy.boss
+                    ? 42
+                    : 52;
+
+            world.shake =
+                enemy.boss
+                    ? 10
+                    : 6;
+
+            world.flash = 2;
+
+            particleBurst(
+                player.x +
+                player.w / 2,
+
+                player.y + 45,
+
+                7
+            );
+
+            if (
+                player.hp <= 0
+            ) {
 
                 player.hp = 0;
+
                 player.dead = true;
             }
         }
     });
 }
 
-function updateRain() {
+
+function updateEffects() {
+
+    for (
+        let i =
+            particles.length - 1;
+        i >= 0;
+        i--
+    ) {
+
+        const particle =
+            particles[i];
+
+        particle.x +=
+            particle.vx;
+
+        particle.y +=
+            particle.vy;
+
+        particle.vy +=
+            particle.type === "smoke"
+                ? -0.01
+                : 0.25;
+
+        particle.vx *=
+            0.97;
+
+        particle.life--;
+
+        if (
+            particle.life <= 0
+        ) {
+
+            particles.splice(
+                i,
+                1
+            );
+        }
+    }
 
     rain.forEach(drop => {
 
-        drop.x -= 1.6;
-        drop.y += drop.speed;
+        drop.x -= 1.8;
 
-        if (drop.y > HEIGHT) {
+        drop.y +=
+            drop.speed;
+
+        if (
+            drop.y >
+            HEIGHT + 20
+        ) {
 
             drop.y = -20;
+
             drop.x =
-                Math.random() * WIDTH;
+                Math.random() *
+                WIDTH;
         }
     });
 }
 
-function drawBackground() {
 
-    ctx.fillStyle = "#080910";
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+function drawSkyline(
+    parallax,
+    color,
+    baseHeight,
+    spacing
+) {
 
-    const moonX =
-        760 - world.cameraX * 0.05;
+    const offset =
+        (
+            world.cameraX *
+            parallax
+        ) %
+        spacing;
 
-    ctx.fillStyle = "#b9b0af";
+    for (
+        let i = -2;
+        i < 10;
+        i++
+    ) {
 
-    ctx.beginPath();
+        const x =
+            i *
+            spacing -
+            offset;
 
-    ctx.arc(
-        moonX,
-        90,
-        44,
-        0,
-        Math.PI * 2
-    );
+        const height =
+            baseHeight +
+            (
+                (
+                    i * 53 +
+                    90
+                ) %
+                120
+            );
 
-    ctx.fill();
-
-    ctx.fillStyle = "#101017";
-
-    ctx.beginPath();
-
-    ctx.arc(
-        moonX + 18,
-        76,
-        39,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    drawSkyline(0.12, "#11131a", 140);
-    drawSkyline(0.25, "#17171d", 220);
-
-    ctx.fillStyle = "#171419";
-
-    ctx.fillRect(
-        0,
-        world.ground,
-        WIDTH,
-        HEIGHT - world.ground
-    );
-
-    ctx.fillStyle = "#232127";
-
-    ctx.fillRect(
-        0,
-        world.ground,
-        WIDTH,
-        7
-    );
-
-    drawStreet();
-}
-
-function drawSkyline(parallax, color, base) {
-
-    ctx.fillStyle = color;
-
-    for (let i = -2; i < 15; i++) {
-
-        const bx =
-            i * 130 -
-            (world.cameraX * parallax % 130);
-
-        const h =
-            base +
-            ((i * 41) % 120);
-
-        ctx.fillRect(
-            bx,
-            world.ground - h,
-            104,
-            h
+        pixelRect(
+            x,
+            world.ground -
+            height,
+            spacing - 22,
+            height,
+            color
         );
 
-        ctx.fillStyle = "#3d3532";
-
         for (
-            let y = world.ground - h + 25;
-            y < world.ground - 30;
-            y += 35
+            let y =
+                world.ground -
+                height +
+                24;
+
+            y <
+            world.ground -
+            28;
+
+            y += 34
         ) {
 
             for (
-                let x = bx + 14;
-                x < bx + 90;
-                x += 28
+                let wx =
+                    x + 14;
+
+                wx <
+                x +
+                spacing -
+                36;
+
+                wx += 29
             ) {
 
                 if (
-                    (x + y + i) % 3 !== 0
+                    Math.floor(
+                        wx +
+                        y +
+                        i
+                    ) %
+                    4 !==
+                    0
                 ) {
-                    ctx.fillRect(
-                        x,
+
+                    pixelRect(
+                        wx,
                         y,
-                        7,
-                        11
+                        6,
+                        10,
+                        "#4a3c3d"
                     );
                 }
             }
         }
-
-        ctx.fillStyle = color;
     }
 }
+
 
 function drawStreet() {
 
     const offset =
         -world.cameraX;
 
-    const buildings = [
+    const shops = [
 
-        {
-            x: 310,
-            w: 330,
-            label: "VIDEO"
-        },
+        [
+            240,
+            360,
+            "VIDEO / VHS",
+            "#5b263f"
+        ],
 
-        {
-            x: 1010,
-            w: 420,
-            label: "VOID"
-        },
+        [
+            900,
+            440,
+            "VOID",
+            "#52294a"
+        ],
 
-        {
-            x: 1890,
-            w: 400,
-            label: "24H"
-        },
+        [
+            1600,
+            420,
+            "24 HOUR DELI",
+            "#4d3d25"
+        ],
 
-        {
-            x: 2700,
-            w: 560,
-            label: "THE PIT"
-        }
+        [
+            2330,
+            520,
+            "NOCTURNE",
+            "#4b2034"
+        ],
+
+        [
+            3180,
+            650,
+            "THE PIT",
+            "#5a232a"
+        ]
     ];
 
-    buildings.forEach(b => {
+    shops.forEach(
+        (
+            [
+                shopX,
+                shopWidth,
+                label,
+                signColor
+            ]
+        ) => {
 
-        const x =
-            b.x + offset;
+            const x =
+                shopX +
+                offset;
 
-        if (
-            x + b.w < -100 ||
-            x > WIDTH + 100
-        ) {
-            return;
+            if (
+                x >
+                WIDTH + 100 ||
+                x +
+                shopWidth <
+                -100
+            ) {
+                return;
+            }
+
+            pixelRect(
+                x,
+                205,
+                shopWidth,
+                253,
+                "#241d25"
+            );
+
+            pixelRect(
+                x + 10,
+                218,
+                shopWidth - 20,
+                8,
+                "#3c3037"
+            );
+
+            pixelRect(
+                x + 36,
+                278,
+                105,
+                180,
+                "#0b0b10"
+            );
+
+            pixelRect(
+                x + 175,
+                252,
+                142,
+                35,
+                signColor
+            );
+
+            ctx.font =
+                "bold 16px monospace";
+
+            ctx.fillStyle =
+                "#d4b8bf";
+
+            ctx.fillText(
+                label,
+                x + 185,
+                276
+            );
+
+            for (
+                let wx =
+                    x + 170;
+
+                wx <
+                x +
+                shopWidth -
+                40;
+
+                wx += 62
+            ) {
+
+                pixelRect(
+                    wx,
+                    320,
+                    34,
+                    54,
+                    "#101017"
+                );
+
+                pixelRect(
+                    wx + 4,
+                    326,
+                    26,
+                    4,
+                    "#47343d"
+                );
+            }
         }
-
-        ctx.fillStyle = "#201c21";
-
-        ctx.fillRect(
-            x,
-            205,
-            b.w,
-            250
-        );
-
-        ctx.fillStyle = "#302932";
-
-        ctx.fillRect(
-            x + 18,
-            240,
-            b.w - 36,
-            8
-        );
-
-        ctx.fillStyle = "#0d0d10";
-
-        ctx.fillRect(
-            x + 45,
-            290,
-            100,
-            165
-        );
-
-        ctx.fillStyle = "#4d2734";
-
-        ctx.fillRect(
-            x + 180,
-            260,
-            110,
-            32
-        );
-
-        ctx.fillStyle = "#b38a91";
-
-        ctx.font =
-            "bold 17px monospace";
-
-        ctx.fillText(
-            b.label,
-            x + 194,
-            282
-        );
-    });
+    );
 
     for (
-        let x = 400;
+        let x = 460;
         x < world.width;
-        x += 520
+        x += 560
     ) {
 
-        const sx =
-            x + offset;
+        const screenX =
+            x +
+            offset;
 
-        ctx.fillStyle = "#252128";
-
-        ctx.fillRect(
-            sx,
+        pixelRect(
+            screenX,
             320,
             8,
-            135
+            138,
+            "#2a252d"
         );
 
-        ctx.fillStyle = "#65515b";
-
-        ctx.fillRect(
-            sx - 4,
+        pixelRect(
+            screenX - 4,
             318,
-            55,
-            5
-        );
-
-        ctx.fillStyle = "#79525c";
-
-        ctx.fillRect(
-            sx + 39,
-            323,
-            12,
-            8
+            57,
+            5,
+            "#66525b"
         );
     }
 
-    ctx.fillStyle = "#09090b";
+    pixelRect(
+        0,
+        world.ground,
+        WIDTH,
+        HEIGHT -
+        world.ground,
+        "#17151a"
+    );
 
-    for (
-        let x = 0;
-        x < world.width;
-        x += 180
-    ) {
-
-        const sx =
-            x + offset;
-
-        ctx.fillRect(
-            sx,
-            485,
-            110,
-            7
-        );
-    }
+    pixelRect(
+        0,
+        world.ground,
+        WIDTH,
+        7,
+        "#30252d"
+    );
 }
+
+
+function drawBackground() {
+
+    const gradient =
+        ctx.createLinearGradient(
+            0,
+            0,
+            0,
+            HEIGHT
+        );
+
+    gradient.addColorStop(
+        0,
+        "#070812"
+    );
+
+    gradient.addColorStop(
+        0.55,
+        "#11101b"
+    );
+
+    gradient.addColorStop(
+        1,
+        "#21151a"
+    );
+
+    ctx.fillStyle =
+        gradient;
+
+    ctx.fillRect(
+        0,
+        0,
+        WIDTH,
+        HEIGHT
+    );
+
+    const moonX =
+        780 -
+        world.cameraX *
+        0.05;
+
+    ctx.fillStyle =
+        "#b8afb4";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        moonX,
+        80,
+        38,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle =
+        "#0c0d16";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        moonX + 15,
+        68,
+        35,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+
+    drawSkyline(
+        0.1,
+        "#10121a",
+        135,
+        120
+    );
+
+    drawSkyline(
+        0.2,
+        "#171722",
+        205,
+        145
+    );
+
+    drawSkyline(
+        0.34,
+        "#211a23",
+        260,
+        180
+    );
+
+    drawStreet();
+}
+
 
 function drawPlayer() {
 
-    const x =
+    let x =
         Math.round(
-            player.x - world.cameraX
+            player.x -
+            world.cameraX
         );
 
-    const y =
-        Math.round(player.y);
+    let y =
+        Math.round(
+            player.y
+        );
+
+    y +=
+        player.grounded
+            ? Math.sin(
+                player.anim * 2
+            ) *
+            (
+                Math.abs(
+                    player.vx
+                ) >
+                0.7
+                    ? 2
+                    : 1
+            )
+            : 0;
 
     ctx.save();
 
     if (
-        player.hurtTimer > 0 &&
-        player.hurtTimer % 8 < 4
+        player.inv > 0 &&
+        player.inv % 8 < 4
     ) {
-        ctx.globalAlpha = 0.45;
+
+        ctx.globalAlpha =
+            0.45;
     }
 
-    if (player.facing < 0) {
+    if (
+        player.facing < 0
+    ) {
 
         ctx.translate(
-            x + player.w / 2,
+            x +
+            player.w / 2,
             0
         );
 
-        ctx.scale(-1, 1);
+        ctx.scale(
+            -1,
+            1
+        );
 
         ctx.translate(
-            -(x + player.w / 2),
+            -(
+                x +
+                player.w / 2
+            ),
             0
         );
     }
 
-    // shadow
-    ctx.fillStyle = "#050506";
 
-    ctx.fillRect(
+    pixelRect(
         x + 3,
-        world.ground - 7,
-        42,
-        7
+        world.ground - 6,
+        44,
+        6,
+        "#050507"
     );
 
-    // boots
-    ctx.fillStyle = "#171419";
 
-    ctx.fillRect(
+    const walkSwing =
+        Math.round(
+            Math.sin(
+                player.anim * 1.7
+            ) *
+            3
+        );
+
+
+    pixelRect(
         x + 5,
-        y + 72,
-        13,
-        20
+        y + 42,
+        9,
+        41 +
+        walkSwing,
+        "#18131b"
     );
 
-    ctx.fillRect(
-        x + 25,
-        y + 72,
-        13,
-        20
+    pixelRect(
+        x + 31,
+        y + 42,
+        9,
+        41 -
+        walkSwing,
+        "#18131b"
     );
 
-    // legs
-    ctx.fillStyle = "#252128";
 
-    ctx.fillRect(
+    pixelRect(
+        x + 4,
+        y + 73,
+        14,
+        23,
+        "#111015"
+    );
+
+    pixelRect(
+        x + 27,
+        y + 73,
+        14,
+        23,
+        "#111015"
+    );
+
+
+    pixelRect(
         x + 7,
-        y + 51,
-        12,
-        28
+        y + 58,
+        11,
+        23,
+        "#29222b"
     );
 
-    ctx.fillRect(
-        x + 25,
-        y + 51,
-        12,
-        28
+    pixelRect(
+        x + 27,
+        y + 58,
+        11,
+        23,
+        "#29222b"
     );
 
-    // torso
-    ctx.fillStyle = "#343038";
 
-    ctx.fillRect(
-        x + 5,
-        y + 25,
+    pixelRect(
+        x + 6,
+        y + 26,
         34,
-        35
+        36,
+        "#b19a96"
     );
 
-    // leather vest
-    ctx.fillStyle = "#17151a";
 
-    ctx.fillRect(
-        x + 10,
-        y + 25,
+    pixelRect(
+        x + 11,
+        y + 24,
         24,
-        34
+        39,
+        "#1a171d"
     );
 
-    // arms
-    ctx.fillStyle = "#b8a6a4";
 
-    ctx.fillRect(
-        x,
-        y + 29,
-        9,
-        30
+    pixelRect(
+        x - 2,
+        y + 31,
+        11,
+        31,
+        "#bca5a0"
     );
 
-    ctx.fillRect(
+    pixelRect(
         x + 36,
-        y + 29,
-        9,
-        30
+        y + 31,
+        11,
+        31,
+        "#bca5a0"
     );
 
-    // tattoos
-    ctx.fillStyle = "#29252d";
 
-    ctx.fillRect(
-        x + 1,
-        y + 36,
+    pixelRect(
+        x,
+        y + 38,
         7,
-        3
+        3,
+        "#3a2d39"
     );
 
-    ctx.fillRect(
-        x + 37,
-        y + 41,
+    pixelRect(
+        x + 38,
+        y + 39,
         7,
-        3
+        3,
+        "#3a2d39"
     );
 
-    // head
-    ctx.fillStyle = "#c4b2ae";
 
-    ctx.fillRect(
+    pixelRect(
         x + 11,
         y + 3,
         24,
-        24
+        24,
+        "#c9b5b0"
     );
 
-    // hair
-    ctx.fillStyle = "#17151a";
 
-    ctx.fillRect(
-        x + 9,
-        y,
-        28,
-        9
-    );
-
-    ctx.fillRect(
+    pixelRect(
         x + 8,
-        y + 5,
-        5,
-        15
+        y,
+        30,
+        9,
+        "#151218"
     );
 
-    // eye
-    ctx.fillStyle = "#b81832";
+    pixelRect(
+        x + 7,
+        y + 6,
+        6,
+        20,
+        "#151218"
+    );
 
-    ctx.fillRect(
+
+    pixelRect(
         x + 28,
         y + 13,
         4,
-        3
+        3,
+        "#d2253d"
     );
 
-    if (player.attackTimer > 0) {
 
-        ctx.fillStyle = "#c2b2b1";
+    if (
+        player.attackTimer > 0
+    ) {
 
-        ctx.fillRect(
-            x + 39,
-            y + 34,
-            32,
-            10
+        if (
+            player.combo === 1
+        ) {
+
+            pixelRect(
+                x + 37,
+                y + 31,
+                35,
+                11,
+                "#c7afaa"
+            );
+
+            pixelRect(
+                x + 68,
+                y + 29,
+                12,
+                15,
+                "#151217"
+            );
+        }
+
+        else if (
+            player.combo === 2
+        ) {
+
+            pixelRect(
+                x + 38,
+                y + 25,
+                28,
+                10,
+                "#c7afaa"
+            );
+
+            pixelRect(
+                x + 62,
+                y + 18,
+                13,
+                22,
+                "#151217"
+            );
+
+            pixelRect(
+                x + 9,
+                y + 64,
+                51,
+                8,
+                "#6e3140"
+            );
+        }
+
+        else {
+
+            pixelRect(
+                x + 35,
+                y + 36,
+                42,
+                13,
+                "#c7afaa"
+            );
+
+            pixelRect(
+                x + 72,
+                y + 32,
+                13,
+                18,
+                "#151217"
+            );
+
+            pixelRect(
+                x + 20,
+                y + 16,
+                6,
+                52,
+                "#79263a"
+            );
+        }
+    }
+
+
+    if (
+        player.dash > 0
+    ) {
+
+        ctx.globalAlpha =
+            0.25;
+
+        pixelRect(
+            x - 26,
+            y + 15,
+            34,
+            68,
+            "#8d263f"
         );
 
-        ctx.fillStyle = "#1c161b";
-
-        ctx.fillRect(
-            x + 66,
-            y + 32,
-            12,
-            14
+        pixelRect(
+            x - 45,
+            y + 25,
+            22,
+            52,
+            "#5d1f36"
         );
     }
 
     ctx.restore();
 }
+
 
 function drawEnemy(enemy) {
 
@@ -886,98 +1526,214 @@ function drawEnemy(enemy) {
         return;
     }
 
-    const x =
+    let x =
         Math.round(
-            enemy.x - world.cameraX
+            enemy.x -
+            world.cameraX
         );
 
     const y =
-        Math.round(enemy.y);
+        Math.round(
+            enemy.y
+        );
 
     if (
-        x < -100 ||
-        x > WIDTH + 100
+        x < -120 ||
+        x >
+        WIDTH + 120
     ) {
         return;
     }
 
-    ctx.fillStyle =
-        enemy.hurt > 0
-            ? "#d0b9ba"
-            : enemy.color;
+    ctx.save();
 
-    ctx.fillRect(
+
+    if (
+        enemy.facing < 0
+    ) {
+
+        ctx.translate(
+            x +
+            enemy.w / 2,
+            0
+        );
+
+        ctx.scale(
+            -1,
+            1
+        );
+
+        ctx.translate(
+            -(
+                x +
+                enemy.w / 2
+            ),
+            0
+        );
+    }
+
+
+    const bodyColor =
+        enemy.hurt > 0
+            ? "#d7c1bf"
+            : enemy.boss
+                ? "#713440"
+                : enemy.type === "hunter"
+                    ? "#5f6172"
+                    : "#59645f";
+
+
+    pixelRect(
         x + 5,
         y + 20,
         enemy.w - 10,
-        enemy.h - 20
+        enemy.h - 20,
+        bodyColor
     );
 
-    ctx.fillStyle = "#211c21";
 
-    ctx.fillRect(
-        x + 8,
+    pixelRect(
+        x + 9,
         y,
-        enemy.w - 16,
-        24
+        enemy.w - 18,
+        24,
+        "#211a21"
     );
 
-    ctx.fillStyle =
-        enemy.boss
-            ? "#b62532"
-            : "#a65f61";
 
-    ctx.fillRect(
-        x + enemy.w - 13,
-        y + 9,
+    pixelRect(
+        x +
+        enemy.w -
+        14,
+        y + 10,
         4,
-        3
+        3,
+        enemy.boss
+            ? "#ff304c"
+            : "#cf6b72"
     );
 
-    ctx.fillStyle = "#151318";
 
-    ctx.fillRect(
+    pixelRect(
         x,
-        y + enemy.h - 12,
+        y +
+        enemy.h -
+        13,
         enemy.w,
-        12
+        13,
+        "#121116"
     );
 
-    const hpW =
-        enemy.w *
-        Math.max(
-            0,
-            enemy.hp / enemy.maxHp
+
+    if (enemy.boss) {
+
+        pixelRect(
+            x - 9,
+            y + 24,
+            12,
+            58,
+            "#8c4249"
         );
 
-    ctx.fillStyle = "#1a1518";
+        pixelRect(
+            x +
+            enemy.w -
+            3,
+            y + 24,
+            12,
+            58,
+            "#8c4249"
+        );
+    }
 
-    ctx.fillRect(
+    else if (
+        enemy.type === "hunter"
+    ) {
+
+        pixelRect(
+            x +
+            enemy.w -
+            5,
+            y + 32,
+            18,
+            5,
+            "#b6a37c"
+        );
+    }
+
+
+    pixelRect(
         x,
         y - 11,
         enemy.w,
-        4
+        4,
+        "#181318"
     );
 
-    ctx.fillStyle =
-        enemy.boss
-            ? "#942632"
-            : "#755159";
-
-    ctx.fillRect(
+    pixelRect(
         x,
         y - 11,
-        hpW,
-        4
+        enemy.w *
+        clamp(
+            enemy.hp /
+            enemy.maxHp,
+            0,
+            1
+        ),
+        4,
+        enemy.boss
+            ? "#a92f3e"
+            : "#7f5861"
     );
+
+
+    ctx.restore();
 }
 
-function drawRain() {
+
+function drawEffects() {
+
+    particles.forEach(
+        particle => {
+
+            const x =
+                particle.x -
+                world.cameraX;
+
+            ctx.globalAlpha =
+                clamp(
+                    particle.life /
+                    particle.maxLife,
+                    0,
+                    1
+                );
+
+            const color =
+                particle.type === "blood"
+                    ? "#a51e35"
+                    : particle.type === "spark"
+                        ? "#d6b97a"
+                        : "#5d5060";
+
+            pixelRect(
+                x,
+                particle.y,
+                particle.type === "spark"
+                    ? 2
+                    : 3,
+                particle.type === "smoke"
+                    ? 5
+                    : 3,
+                color
+            );
+
+            ctx.globalAlpha = 1;
+        }
+    );
+
 
     ctx.strokeStyle =
-        "rgba(150,160,180,.25)";
-
-    ctx.lineWidth = 1;
+        "rgba(170,180,210,.24)";
 
     ctx.beginPath();
 
@@ -990,133 +1746,172 @@ function drawRain() {
 
         ctx.lineTo(
             drop.x - 4,
-            drop.y + drop.len
+            drop.y +
+            drop.len
         );
     });
 
     ctx.stroke();
 }
 
-function drawHUD() {
 
-    ctx.fillStyle =
-        "rgba(5,5,8,.75)";
+function drawHud() {
 
-    ctx.fillRect(
-        20,
+    pixelRect(
         18,
-        290,
-        58
+        16,
+        315,
+        68,
+        "rgba(4,4,7,.78)"
     );
 
-    ctx.fillStyle = "#e2d7da";
+
+    ctx.fillStyle =
+        "#eadfe2";
 
     ctx.font =
         "bold 17px monospace";
 
     ctx.fillText(
         "THE STRAY",
-        32,
-        41
+        31,
+        40
     );
 
-    ctx.fillStyle = "#26141a";
 
-    ctx.fillRect(
-        32,
-        53,
-        250,
-        10
+    ctx.font =
+        "12px monospace";
+
+    ctx.fillStyle =
+        "#8e7c86";
+
+    ctx.fillText(
+        "Caitiff • Brooklyn, 1996",
+        31,
+        57
     );
 
-    ctx.fillStyle = "#8e2030";
 
-    ctx.fillRect(
-        32,
-        53,
-        250 *
-            (
-                player.hp /
-                player.maxHp
-            ),
-        10
+    pixelRect(
+        31,
+        66,
+        260,
+        9,
+        "#24131a"
     );
+
+    pixelRect(
+        31,
+        66,
+        260 *
+        (
+            player.hp /
+            player.maxHp
+        ),
+        9,
+        "#96263a"
+    );
+
+
+    if (
+        player.combo > 0 &&
+        player.comboWindow > 0
+    ) {
+
+        ctx.fillStyle =
+            "#c9a7b2";
+
+        ctx.font =
+            "bold 13px monospace";
+
+        ctx.fillText(
+            `COMBO ${player.combo}/3`,
+            346,
+            40
+        );
+    }
+
 
     const boss =
         enemies.find(
-            e => e.boss && e.alive
+            enemy =>
+                enemy.boss &&
+                enemy.alive
         );
+
 
     if (
         boss &&
         Math.abs(
-            boss.x - player.x
-        ) < 650
+            boss.x -
+            player.x
+        ) <
+        720
     ) {
 
-        ctx.fillStyle =
-            "rgba(5,5,8,.8)";
-
-        ctx.fillRect(
-            WIDTH / 2 - 230,
-            HEIGHT - 63,
-            460,
-            40
+        pixelRect(
+            WIDTH / 2 - 235,
+            HEIGHT - 64,
+            470,
+            41,
+            "rgba(4,4,7,.84)"
         );
 
-        ctx.fillStyle = "#d4c7c9";
+        ctx.textAlign =
+            "center";
+
+        ctx.fillStyle =
+            "#dfd0d2";
 
         ctx.font =
             "bold 14px monospace";
 
-        ctx.textAlign = "center";
-
         ctx.fillText(
             "THE BUTCHER",
             WIDTH / 2,
-            HEIGHT - 45
+            HEIGHT - 46
         );
 
-        ctx.fillStyle = "#291418";
-
-        ctx.fillRect(
+        pixelRect(
             WIDTH / 2 - 190,
-            HEIGHT - 37,
+            HEIGHT - 38,
             380,
-            7
+            7,
+            "#2b1419"
         );
 
-        ctx.fillStyle = "#8e2530";
-
-        ctx.fillRect(
+        pixelRect(
             WIDTH / 2 - 190,
-            HEIGHT - 37,
+            HEIGHT - 38,
             380 *
-                (
-                    boss.hp /
-                    boss.maxHp
-                ),
-            7
+            (
+                boss.hp /
+                boss.maxHp
+            ),
+            7,
+            "#9d2836"
         );
 
-        ctx.textAlign = "left";
+        ctx.textAlign =
+            "left";
     }
+
 
     if (player.dead) {
 
-        ctx.fillStyle =
-            "rgba(0,0,0,.73)";
-
-        ctx.fillRect(
+        pixelRect(
             0,
             0,
             WIDTH,
-            HEIGHT
+            HEIGHT,
+            "rgba(0,0,0,.74)"
         );
 
-        ctx.fillStyle = "#c3b6b9";
+        ctx.textAlign =
+            "center";
 
-        ctx.textAlign = "center";
+        ctx.fillStyle =
+            "#d7c9cc";
 
         ctx.font =
             "bold 38px monospace";
@@ -1136,81 +1931,178 @@ function drawHUD() {
             HEIGHT / 2 + 42
         );
 
-        ctx.textAlign = "left";
+        ctx.textAlign =
+            "left";
     }
 
-    const living =
-        enemies.filter(e => e.alive);
 
     if (
-        living.length === 0 &&
+        enemies.every(
+            enemy =>
+                !enemy.alive
+        ) &&
         !player.dead
     ) {
 
-        ctx.fillStyle =
-            "rgba(0,0,0,.72)";
-
-        ctx.fillRect(
-            WIDTH / 2 - 240,
-            170,
-            480,
-            120
+        pixelRect(
+            WIDTH / 2 - 250,
+            166,
+            500,
+            130,
+            "rgba(0,0,0,.78)"
         );
 
-        ctx.fillStyle = "#d8ced0";
+        ctx.textAlign =
+            "center";
 
-        ctx.textAlign = "center";
+        ctx.fillStyle =
+            "#e1d4d6";
 
         ctx.font =
             "bold 30px monospace";
 
         ctx.fillText(
-            "PROTOTYPE COMPLETE",
+            "PROTOTYPE 0.2 COMPLETE",
             WIDTH / 2,
-            218
+            215
         );
 
         ctx.font =
             "16px monospace";
 
         ctx.fillText(
-            "The streets remember your name.",
+            "Brooklyn survives. For now.",
             WIDTH / 2,
-            254
+            252
         );
 
-        ctx.textAlign = "left";
+        ctx.textAlign =
+            "left";
     }
 }
 
+
 function update() {
 
+    if (
+        world.hitStop > 0
+    ) {
+
+        world.hitStop--;
+
+        Object.keys(
+            pressed
+        ).forEach(
+            key =>
+                delete pressed[key]
+        );
+
+        return;
+    }
+
     updatePlayer();
+
     updateEnemies();
-    updateRain();
+
+    updateEffects();
+
+
+    if (
+        world.shake > 0
+    ) {
+
+        world.shake *=
+            0.78;
+    }
+
+
+    if (
+        world.flash > 0
+    ) {
+
+        world.flash--;
+    }
+
+
+    Object.keys(
+        pressed
+    ).forEach(
+        key =>
+            delete pressed[key]
+    );
 }
+
 
 function draw() {
 
+    ctx.save();
+
+
+    if (
+        world.shake > 0
+    ) {
+
+        ctx.translate(
+            (
+                Math.random() -
+                0.5
+            ) *
+            world.shake,
+
+            (
+                Math.random() -
+                0.5
+            ) *
+            world.shake
+        );
+    }
+
+
     drawBackground();
 
-    enemies.forEach(drawEnemy);
+
+    enemies.forEach(
+        drawEnemy
+    );
+
 
     drawPlayer();
 
-    drawRain();
 
-    drawHUD();
+    drawEffects();
+
+
+    ctx.restore();
+
+
+    drawHud();
+
+
+    if (
+        world.flash > 0
+    ) {
+
+        pixelRect(
+            0,
+            0,
+            WIDTH,
+            HEIGHT,
+            "rgba(255,220,225,.06)"
+        );
+    }
 }
+
 
 function gameLoop() {
 
     update();
+
     draw();
 
     requestAnimationFrame(
         gameLoop
     );
 }
+
 
 gameLoop();
