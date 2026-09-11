@@ -1,47 +1,31 @@
 ﻿<!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta charset="UTF-8">
 
-    <title>Night Blood</title>
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <link rel="stylesheet" href="style.css">
+<title>Night Blood</title>
+
+<link rel="stylesheet" href="style.css">
+
 </head>
 
 <body>
 
-<div id="game-shell">
+<div id="shell">
 
-    <header>
-
-        <div>
-            <div class="city">BROOKLYN • 1996</div>
-            <h1>NIGHT BLOOD</h1>
-            <div class="version">
-                Prototype 0.4 — Gothic Brooklyn
-            </div>
-        </div>
-
-        <div class="controls">
-            <span>A / D</span> MOVE
-            <span>SPACE</span> JUMP
-            <span>J</span> ATTACK
-            <span>K / SHIFT</span> DASH
-        </div>
-
-    </header>
-
-    <div id="frame">
+    <div id="stage">
 
         <canvas
             id="game"
-            width="640"
-            height="360"
+            width="768"
+            height="432"
         ></canvas>
 
         <div class="scanlines"></div>
@@ -49,13 +33,20 @@
 
     </div>
 
-    <footer>
-        THE NIGHT IS ONLY BEGINNING
-    </footer>
+    <div id="caption">
+
+        NIGHT BLOOD • BROOKLYN 1996 • PROTOTYPE 0.14
+
+        <span>
+            A/D MOVE • SPACE JUMP • J ATTACK • K/SHIFT DASH
+        </span>
+
+    </div>
 
 </div>
 
 <script src="game.js"></script>
 
 </body>
+
 </html>
