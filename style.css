@@ -8,12 +8,12 @@ body {
     min-height: 100%;
     background:
         radial-gradient(
-            circle at 50% -10%,
-            #24131c 0%,
-            #0b0910 38%,
-            #040407 100%
+            circle at 50% 0%,
+            #1a1423 0%,
+            #08070d 42%,
+            #030305 100%
         );
-    color: #d8cbd0;
+    color: #ddd0d3;
     font-family:
         Consolas,
         "Courier New",
@@ -25,69 +25,75 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow-x: hidden;
 }
 
 #game-shell {
-    width: min(1280px, 98vw);
-    margin: 24px auto;
+    width: min(1440px, 98vw);
+    margin: 16px auto;
 }
 
 header {
     display: flex;
     justify-content: space-between;
-    align-items: end;
+    align-items: flex-end;
+    padding: 0 6px 12px;
     gap: 30px;
-    padding: 0 8px 12px;
 }
 
-.eyebrow {
-    color: #7e4b5a;
-    font-size: 11px;
-    letter-spacing: 4px;
+.city {
+    font-size: 10px;
+    letter-spacing: 5px;
+    color: #7d6975;
 }
 
 h1 {
-    margin: 2px 0 1px;
-    font-size: clamp(28px, 5vw, 48px);
-    line-height: 1;
-    letter-spacing: 7px;
-    color: #e0d4d6;
+    margin: 4px 0 1px;
+    line-height: .9;
+    font-size: clamp(34px, 5vw, 60px);
+    font-family: Georgia, serif;
+    font-weight: 900;
+    letter-spacing: 6px;
+    color: #b4263d;
+
     text-shadow:
-        3px 3px 0 #3e1422,
-        6px 6px 0 #12080d;
+        2px 2px 0 #45111c,
+        5px 5px 0 #080407,
+        0 0 20px rgba(175,25,55,.22);
 }
 
-.subtitle {
-    margin-top: 6px;
-    color: #856b75;
-    font-size: 12px;
-    letter-spacing: 1px;
+.version {
+    margin-top: 8px;
+    color: #715e68;
+    font-size: 11px;
 }
 
 .controls {
-    color: #675861;
-    font-size: 11px;
     text-align: right;
-    line-height: 1.9;
+    color: #655862;
+    font-size: 10px;
+    line-height: 2;
 }
 
 .controls span {
-    color: #be9da7;
-    margin-left: 9px;
+    border: 1px solid #66545e;
+    padding: 3px 6px;
+    margin-left: 8px;
+    color: #c8b4ba;
+    background: #0b090d;
 }
 
-#canvas-frame {
+#frame {
     position: relative;
-    width: 100%;
-    border: 1px solid #39232d;
-    box-shadow:
-        0 0 0 4px #08070a,
-        0 0 0 5px #1c1218,
-        0 24px 70px rgba(0,0,0,.65),
-        0 0 70px rgba(91, 19, 42, .12);
-    background: #000;
     overflow: hidden;
+    background: #000;
+
+    border: 1px solid #3b2932;
+
+    box-shadow:
+        0 0 0 5px #050507,
+        0 0 0 6px #23161d,
+        0 28px 90px rgba(0,0,0,.75),
+        0 0 80px rgba(108,15,44,.10);
 }
 
 canvas {
@@ -96,46 +102,48 @@ canvas {
     height: auto;
     aspect-ratio: 16 / 9;
     image-rendering: pixelated;
-    image-rendering: crisp-edges;
 }
 
 .scanlines {
     pointer-events: none;
     position: absolute;
     inset: 0;
-    opacity: .10;
+
     background:
         repeating-linear-gradient(
             to bottom,
-            transparent 0,
-            transparent 3px,
-            rgba(0,0,0,.42) 4px
+            rgba(255,255,255,0) 0px,
+            rgba(255,255,255,0) 3px,
+            rgba(0,0,0,.16) 4px
         );
+
+    opacity: .4;
 }
 
 .vignette {
     pointer-events: none;
     position: absolute;
     inset: 0;
+
     box-shadow:
-        inset 0 0 90px rgba(0,0,0,.78);
+        inset 0 0 120px rgba(0,0,0,.76);
 }
 
 footer {
-    padding: 12px 8px 0;
-    color: #4f4449;
-    font-size: 10px;
-    letter-spacing: 2px;
+    padding: 12px;
     text-align: center;
+    font-size: 10px;
+    letter-spacing: 5px;
+    color: #44373e;
 }
 
-@media (max-width: 800px) {
+@media(max-width: 800px) {
     header {
         display: block;
     }
 
     .controls {
-        margin-top: 12px;
+        margin-top: 10px;
         text-align: left;
     }
 }
