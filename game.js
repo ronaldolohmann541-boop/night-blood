@@ -5,14 +5,16 @@ const ctx = canvas.getContext("2d");
 
 ctx.imageSmoothingEnabled = false;
 
-const WIDTH = canvas.width;
-const HEIGHT = canvas.height;
+const W = canvas.width;
+const H = canvas.height;
+
+const WORLD_W = 2200;
+const GROUND = 229;
 
 const keys = {};
 const pressed = {};
 
 addEventListener("keydown", e => {
-
     if (!keys[e.code]) {
         pressed[e.code] = true;
     }
@@ -35,47 +37,35 @@ addEventListener("keyup", e => {
 
 
 const world = {
-
-    width: 4300,
-
-    ground: 458,
-
-    gravity: 0.72,
-
     cameraX: 0,
-
     shake: 0,
-
+    hitStop: 0,
     flash: 0,
-
-    hitStop: 0
+    time: 0,
+    fog: 0
 };
 
 
 const player = {
+    x: 74,
+    y: 177,
 
-    x: 140,
-    y: 350,
-
-    w: 46,
-    h: 96,
+    w: 24,
+    h: 52,
 
     vx: 0,
     vy: 0,
 
-    speed: 4.4,
-    jump: 14.2,
-
-    facing: 1,
+    speed: 2.45,
+    jumpPower: 7.7,
 
     grounded: false,
+    facing: 1,
 
     hp: 120,
     maxHp: 120,
 
     inv: 0,
-
-    dead: false,
 
     attackTimer: 0,
     attackCooldown: 0,
@@ -84,107 +74,96 @@ const player = {
     comboWindow: 0,
 
     dash: 0,
-    dashCd: 0,
+    dashCooldown: 0,
 
-    anim: 0
+    anim: 0,
+    state: "idle",
+
+    dead: false
 };
 
 
-const enemyDefinitions = [
-
-    ["thug",   760,  38, 1.25],
-
-    ["thug",  1220,  44, 1.35],
-
-    ["hunter",1770,  58, 1.55],
-
-    ["thug",  2360,  48, 1.45],
-
-    ["hunter",2730,  60, 1.55],
-
-    ["boss",  3470, 210, 1.05]
+const enemyData = [
+    ["thug", 385, 38],
+    ["thug", 615, 44],
+    ["hunter", 870, 58],
+    ["thug", 1185, 48],
+    ["hunter", 1380, 60],
+    ["boss", 1775, 230]
 ];
 
 
-const enemies = enemyDefinitions.map(
-    ([type, x, hp, speed]) => ({
+const enemies = enemyData.map(([type, x, hp]) => ({
+    type,
 
-        type,
+    x,
 
-        x,
+    y:
+        type === "boss"
+            ? GROUND - 69
+            : type === "hunter"
+                ? GROUND - 48
+                : GROUND - 42,
 
-        y:
-            type === "boss"
-                ? 338
-                : type === "hunter"
-                    ? 378
-                    : 392,
+    w:
+        type === "boss"
+            ? 43
+            : type === "hunter"
+                ? 25
+                : 23,
 
-        w:
-            type === "boss"
-                ? 76
-                : type === "hunter"
-                    ? 48
-                    : 44,
+    h:
+        type === "boss"
+            ? 69
+            : type === "hunter"
+                ? 48
+                : 42,
 
-        h:
-            type === "boss"
-                ? 120
-                : type === "hunter"
-                    ? 78
-                    : 66,
+    hp,
+    maxHp: hp,
 
-        hp,
-        maxHp: hp,
+    speed:
+        type === "boss"
+            ? 0.54
+            : type === "hunter"
+                ? 0.76
+                : 0.68,
 
-        speed,
+    alive: true,
 
-        alive: true,
+    facing: -1,
 
-        hurt: 0,
+    hurt: 0,
 
-        cooldown: 0,
+    cooldown: 0,
 
-        facing: -1,
+    anim: Math.random() * 10,
 
-        boss: type === "boss"
-    })
-);
+    boss: type === "boss"
+}));
 
 
 const particles = [];
+const slashes = [];
 
 
 const rain = Array.from(
-    { length: 130 },
+    { length: 105 },
     () => ({
-
-        x: Math.random() * WIDTH,
-
-        y: Math.random() * HEIGHT,
-
-        speed:
-            7 +
-            Math.random() * 8,
-
-        len:
-            8 +
-            Math.random() * 11
+        x: Math.random() * W,
+        y: Math.random() * H,
+        speed: 3 + Math.random() * 4,
+        len: 3 + Math.random() * 5
     })
 );
 
 
-function clamp(value, min, max) {
-
-    return Math.max(
-        min,
-        Math.min(max, value)
-    );
+function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
 }
 
 
 function overlap(a, b) {
-
     return (
         a.x < b.x + b.w &&
         a.x + a.w > b.x &&
@@ -194,40 +173,74 @@ function overlap(a, b) {
 }
 
 
-function pixelRect(
-    x,
-    y,
-    width,
-    height,
-    color
-) {
+function rect(x, y, w, h, color, alpha = 1) {
+    const old = ctx.globalAlpha;
 
+    ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
 
     ctx.fillRect(
         Math.round(x),
         Math.round(y),
-        Math.round(width),
-        Math.round(height)
+        Math.round(w),
+        Math.round(h)
     );
+
+    ctx.globalAlpha = old;
+}
+
+
+function poly(points, color, alpha = 1) {
+    const old = ctx.globalAlpha;
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+        Math.round(points[0][0]),
+        Math.round(points[0][1])
+    );
+
+    for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(
+            Math.round(points[i][0]),
+            Math.round(points[i][1])
+        );
+    }
+
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalAlpha = old;
+}
+
+
+function text(
+    value,
+    x,
+    y,
+    color = "#ddd",
+    size = 8,
+    align = "left"
+) {
+    ctx.textAlign = align;
+    ctx.font = `${size}px monospace`;
+    ctx.fillStyle = color;
+    ctx.fillText(value, x, y);
+    ctx.textAlign = "left";
 }
 
 
 function particleBurst(
     x,
     y,
-    amount,
+    count,
     type = "blood"
 ) {
-
-    for (
-        let i = 0;
-        i < amount;
-        i++
-    ) {
-
+    for (let i = 0; i < count; i++) {
         particles.push({
-
             x,
             y,
 
@@ -235,59 +248,69 @@ function particleBurst(
                 (Math.random() - 0.5) *
                 (
                     type === "spark"
-                        ? 8
-                        : 6
+                        ? 4.4
+                        : 3.5
                 ),
 
             vy:
                 -Math.random() *
                 (
                     type === "spark"
-                        ? 7
-                        : 5
+                        ? 4.3
+                        : 3.2
                 ),
 
             life:
-                18 +
-                Math.random() * 22,
+                12 +
+                Math.random() * 20,
 
-            maxLife: 40,
+            type,
 
-            type
+            size:
+                type === "fog"
+                    ? 5 + Math.random() * 8
+                    : 1 + Math.random() * 1.5
         });
     }
 }
 
 
-function playerAttackBox() {
+function slashEffect(x, y, combo, facing) {
+    slashes.push({
+        x,
+        y,
+        combo,
+        facing,
+        life: 7,
+        maxLife: 7
+    });
+}
 
+
+function attackBox() {
     const reach =
         player.combo === 3
-            ? 76
-            : 62;
+            ? 42
+            : 34;
 
     return {
-
         x:
             player.facing > 0
-                ? player.x + player.w - 4
-                : player.x - reach + 4,
+                ? player.x + player.w - 3
+                : player.x - reach + 3,
 
-        y:
-            player.y + 17,
+        y: player.y + 8,
 
         w: reach,
-
-        h: 63
+        h: 36
     };
 }
 
 
 function attack() {
-
     if (
-        player.attackCooldown > 0 ||
-        player.dead
+        player.dead ||
+        player.attackCooldown > 0
     ) {
         return;
     }
@@ -297,22 +320,28 @@ function attack() {
             ? player.combo % 3 + 1
             : 1;
 
-    player.comboWindow = 24;
+    player.comboWindow = 22;
 
     player.attackTimer =
         player.combo === 3
-            ? 15
-            : 11;
+            ? 14
+            : 10;
 
     player.attackCooldown =
         player.combo === 3
-            ? 18
-            : 12;
+            ? 17
+            : 11;
 
-    const hit = playerAttackBox();
+    slashEffect(
+        player.x + player.w / 2,
+        player.y + 22,
+        player.combo,
+        player.facing
+    );
+
+    const hit = attackBox();
 
     enemies.forEach(enemy => {
-
         if (
             !enemy.alive ||
             !overlap(hit, enemy)
@@ -320,50 +349,47 @@ function attack() {
             return;
         }
 
-        const baseDamage =
+        let damage =
             player.combo === 3
-                ? 34
+                ? 36
                 : player.combo === 2
-                    ? 24
+                    ? 25
                     : 20;
 
-        const damage =
-            enemy.boss
-                ? Math.floor(
-                    baseDamage * 0.72
-                )
-                : baseDamage;
+        if (enemy.boss) {
+            damage = Math.floor(damage * 0.72);
+        }
 
         enemy.hp -= damage;
-
-        enemy.hurt = 10;
+        enemy.hurt = 9;
 
         enemy.x +=
             player.facing *
             (
                 player.combo === 3
-                    ? 34
-                    : 18
+                    ? 18
+                    : 10
             );
-
-        world.shake =
-            player.combo === 3
-                ? 9
-                : 5;
-
-        world.flash = 3;
 
         world.hitStop =
             player.combo === 3
                 ? 5
                 : 3;
 
+        world.shake =
+            player.combo === 3
+                ? 5
+                : 3;
+
+        world.flash = 2;
+
         particleBurst(
             enemy.x + enemy.w / 2,
             enemy.y + enemy.h / 2,
             player.combo === 3
                 ? 14
-                : 8
+                : 8,
+            "blood"
         );
 
         particleBurst(
@@ -374,13 +400,13 @@ function attack() {
         );
 
         if (enemy.hp <= 0) {
-
             enemy.alive = false;
 
             particleBurst(
                 enemy.x + enemy.w / 2,
                 enemy.y + enemy.h / 2,
-                18
+                25,
+                "blood"
             );
         }
     });
@@ -388,80 +414,60 @@ function attack() {
 
 
 function dash() {
-
     if (
-        player.dashCd > 0 ||
-        player.dead
+        player.dead ||
+        player.dashCooldown > 0
     ) {
         return;
     }
 
     player.dash = 9;
-
-    player.dashCd = 42;
-
-    player.inv =
-        Math.max(
-            player.inv,
-            12
-        );
+    player.dashCooldown = 40;
+    player.inv = Math.max(player.inv, 13);
 
     particleBurst(
         player.x + player.w / 2,
-        player.y + player.h * 0.8,
-        7,
-        "smoke"
+        player.y + player.h - 3,
+        8,
+        "fog"
     );
 }
 
 
 function resetGame() {
+    Object.assign(player, {
+        x: 74,
+        y: 177,
 
-    Object.assign(
-        player,
-        {
-            x: 140,
-            y: 350,
+        vx: 0,
+        vy: 0,
 
-            vx: 0,
-            vy: 0,
+        hp: 120,
 
-            hp: 120,
+        dead: false,
 
-            inv: 0,
+        combo: 0,
+        comboWindow: 0,
 
-            dead: false,
+        attackTimer: 0,
+        attackCooldown: 0,
 
-            attackTimer: 0,
+        dash: 0,
+        dashCooldown: 0,
 
-            attackCooldown: 0,
+        inv: 0
+    });
 
-            combo: 0,
-
-            comboWindow: 0,
-
-            dash: 0,
-
-            dashCd: 0
-        }
-    );
-
-    enemyDefinitions.forEach(
+    enemyData.forEach(
         ([type, x, hp], index) => {
-
             Object.assign(
                 enemies[index],
                 {
                     x,
-
                     hp,
-
                     maxHp: hp,
-
                     alive: true,
-
                     hurt: 0,
-
                     cooldown: 0
                 }
             );
@@ -471,13 +477,12 @@ function resetGame() {
     world.cameraX = 0;
 
     particles.length = 0;
+    slashes.length = 0;
 }
 
 
 function updatePlayer() {
-
     if (player.dead) {
-
         if (pressed.KeyR) {
             resetGame();
         }
@@ -485,20 +490,20 @@ function updatePlayer() {
         return;
     }
 
-    let direction = 0;
+    let dir = 0;
 
     if (
         keys.KeyA ||
         keys.ArrowLeft
     ) {
-        direction--;
+        dir -= 1;
     }
 
     if (
         keys.KeyD ||
         keys.ArrowRight
     ) {
-        direction++;
+        dir += 1;
     }
 
     if (pressed.KeyJ) {
@@ -507,40 +512,10 @@ function updatePlayer() {
 
     if (
         pressed.KeyK ||
-        pressed.ShiftLeft
+        pressed.ShiftLeft ||
+        pressed.ShiftRight
     ) {
         dash();
-    }
-
-    if (player.dash > 0) {
-
-        player.vx =
-            player.facing *
-            11.5;
-
-        player.dash--;
-    }
-
-    else {
-
-        player.vx +=
-            direction * 0.7;
-
-        player.vx =
-            clamp(
-                player.vx,
-                -player.speed,
-                player.speed
-            );
-
-        if (!direction) {
-            player.vx *= 0.76;
-        }
-
-        if (direction) {
-            player.facing =
-                Math.sign(direction);
-        }
     }
 
     if (
@@ -551,44 +526,58 @@ function updatePlayer() {
         ) &&
         player.grounded
     ) {
-
-        player.vy =
-            -player.jump;
-
+        player.vy = -player.jumpPower;
         player.grounded = false;
     }
 
-    player.vy +=
-        world.gravity;
+    if (player.dash > 0) {
+        player.vx =
+            player.facing *
+            6.2;
 
-    player.x +=
-        player.vx;
+        player.dash--;
+    }
+    else {
+        player.vx += dir * 0.38;
 
-    player.y +=
-        player.vy;
+        player.vx =
+            clamp(
+                player.vx,
+                -player.speed,
+                player.speed
+            );
+
+        if (!dir) {
+            player.vx *= 0.74;
+        }
+
+        if (dir) {
+            player.facing = Math.sign(dir);
+        }
+    }
+
+    player.vy += 0.38;
+
+    player.x += player.vx;
+    player.y += player.vy;
 
     if (
-        player.y +
-        player.h >=
-        world.ground
+        player.y + player.h >=
+        GROUND
     ) {
-
         player.y =
-            world.ground -
+            GROUND -
             player.h;
 
         player.vy = 0;
-
         player.grounded = true;
     }
 
     player.x =
         clamp(
             player.x,
-            24,
-            world.width -
-            player.w -
-            24
+            10,
+            WORLD_W - 40
         );
 
     if (player.attackTimer > 0) {
@@ -602,56 +591,70 @@ function updatePlayer() {
     if (player.comboWindow > 0) {
         player.comboWindow--;
     }
-
     else {
         player.combo = 0;
+    }
+
+    if (player.dashCooldown > 0) {
+        player.dashCooldown--;
     }
 
     if (player.inv > 0) {
         player.inv--;
     }
 
-    if (player.dashCd > 0) {
-        player.dashCd--;
+    player.anim +=
+        0.06 +
+        Math.abs(player.vx) *
+        0.11;
+
+    if (!player.grounded) {
+        player.state =
+            player.vy < 0
+                ? "jump"
+                : "fall";
+    }
+    else if (player.attackTimer > 0) {
+        player.state = "attack";
+    }
+    else if (player.dash > 0) {
+        player.state = "dash";
+    }
+    else if (Math.abs(player.vx) > 0.4) {
+        player.state = "walk";
+    }
+    else {
+        player.state = "idle";
     }
 
-    player.anim +=
-        Math.abs(player.vx) *
-        0.08 +
-        0.02;
-
-    const cameraTarget =
+    const target =
         player.x -
-        WIDTH * 0.34;
+        W * 0.34;
 
     world.cameraX +=
-        (
-            cameraTarget -
-            world.cameraX
-        ) *
-        0.09;
+        (target - world.cameraX) *
+        0.08;
 
     world.cameraX =
         clamp(
             world.cameraX,
             0,
-            world.width -
-            WIDTH
+            WORLD_W - W
         );
 }
 
 
 function updateEnemies() {
-
     if (player.dead) {
         return;
     }
 
     enemies.forEach(enemy => {
-
         if (!enemy.alive) {
             return;
         }
+
+        enemy.anim += 0.045;
 
         if (enemy.hurt > 0) {
             enemy.hurt--;
@@ -669,18 +672,16 @@ function updateEnemies() {
             Math.sign(dx) ||
             enemy.facing;
 
+        const detection =
+            enemy.boss
+                ? 310
+                : 220;
+
         if (
-            Math.abs(dx) <
-            (
-                enemy.boss
-                    ? 600
-                    : 460
-            ) &&
-            Math.abs(dx) >
-            enemy.w * 0.7 &&
+            Math.abs(dx) < detection &&
+            Math.abs(dx) > enemy.w * 0.7 &&
             enemy.hurt <= 0
         ) {
-
             enemy.x +=
                 Math.sign(dx) *
                 enemy.speed;
@@ -691,7 +692,6 @@ function updateEnemies() {
             enemy.cooldown <= 0 &&
             player.inv <= 0
         ) {
-
             const damage =
                 enemy.boss
                     ? 24
@@ -700,7 +700,6 @@ function updateEnemies() {
                         : 11;
 
             player.hp -= damage;
-
             player.inv = 48;
 
             player.vx =
@@ -710,39 +709,31 @@ function updateEnemies() {
                 ) *
                 (
                     enemy.boss
-                        ? 10
-                        : 7
+                        ? 5
+                        : 3.5
                 );
 
-            player.vy = -5;
+            player.vy = -3;
 
             enemy.cooldown =
                 enemy.boss
-                    ? 42
-                    : 52;
+                    ? 38
+                    : 50;
 
             world.shake =
                 enemy.boss
-                    ? 10
-                    : 6;
-
-            world.flash = 2;
+                    ? 6
+                    : 3;
 
             particleBurst(
-                player.x +
-                player.w / 2,
-
-                player.y + 45,
-
-                7
+                player.x + 12,
+                player.y + 22,
+                8,
+                "blood"
             );
 
-            if (
-                player.hp <= 0
-            ) {
-
+            if (player.hp <= 0) {
                 player.hp = 0;
-
                 player.dead = true;
             }
         }
@@ -751,151 +742,221 @@ function updateEnemies() {
 
 
 function updateEffects() {
-
     for (
-        let i =
-            particles.length - 1;
+        let i = particles.length - 1;
         i >= 0;
         i--
     ) {
+        const p = particles[i];
 
-        const particle =
-            particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
 
-        particle.x +=
-            particle.vx;
+        if (p.type === "fog") {
+            p.vy -= 0.005;
+            p.vx *= 0.95;
+        }
+        else {
+            p.vy += 0.14;
+            p.vx *= 0.97;
+        }
 
-        particle.y +=
-            particle.vy;
+        p.life--;
 
-        particle.vy +=
-            particle.type === "smoke"
-                ? -0.01
-                : 0.25;
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
 
-        particle.vx *=
-            0.97;
+    for (
+        let i = slashes.length - 1;
+        i >= 0;
+        i--
+    ) {
+        slashes[i].life--;
 
-        particle.life--;
-
-        if (
-            particle.life <= 0
-        ) {
-
-            particles.splice(
-                i,
-                1
-            );
+        if (slashes[i].life <= 0) {
+            slashes.splice(i, 1);
         }
     }
 
     rain.forEach(drop => {
+        drop.x -= 0.9;
+        drop.y += drop.speed;
 
-        drop.x -= 1.8;
-
-        drop.y +=
-            drop.speed;
-
-        if (
-            drop.y >
-            HEIGHT + 20
-        ) {
-
-            drop.y = -20;
-
-            drop.x =
-                Math.random() *
-                WIDTH;
+        if (drop.y > H + 8) {
+            drop.y = -8;
+            drop.x = Math.random() * W;
         }
     });
+
+    if (world.shake > 0) {
+        world.shake *= 0.75;
+    }
+
+    if (world.flash > 0) {
+        world.flash--;
+    }
+
+    world.time += 0.016;
+    world.fog += 0.003;
 }
 
 
-function drawSkyline(
-    parallax,
-    color,
-    baseHeight,
-    spacing
-) {
+function drawSky() {
+    const gradient =
+        ctx.createLinearGradient(
+            0,
+            0,
+            0,
+            H
+        );
 
-    const offset =
-        (
-            world.cameraX *
-            parallax
-        ) %
-        spacing;
+    gradient.addColorStop(
+        0,
+        "#080812"
+    );
+
+    gradient.addColorStop(
+        0.42,
+        "#17121c"
+    );
+
+    gradient.addColorStop(
+        0.78,
+        "#271720"
+    );
+
+    gradient.addColorStop(
+        1,
+        "#160d13"
+    );
+
+    ctx.fillStyle = gradient;
+
+    ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+    );
+
+
+    const moonX =
+        392 -
+        world.cameraX * 0.025;
+
+    const moonY = 39;
+
+    ctx.fillStyle = "#bbb3ae";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        moonX,
+        moonY,
+        20,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle = "#0e0d15";
+
+    ctx.beginPath();
+
+    ctx.arc(
+        moonX + 8,
+        moonY - 5,
+        18,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fill();
+
+
+    rect(
+        moonX - 42,
+        moonY + 21,
+        95,
+        2,
+        "#725d66",
+        0.12
+    );
+}
+
+
+function drawFarCity() {
+    const parallax =
+        world.cameraX * 0.09;
 
     for (
         let i = -2;
-        i < 10;
+        i < 12;
         i++
     ) {
-
         const x =
-            i *
-            spacing -
-            offset;
+            i * 56 -
+            (parallax % 56);
 
-        const height =
-            baseHeight +
+        const h =
+            48 +
             (
-                (
-                    i * 53 +
-                    90
-                ) %
-                120
+                (i * 17 + 37) %
+                63
             );
 
-        pixelRect(
+        rect(
             x,
-            world.ground -
-            height,
-            spacing - 22,
-            height,
-            color
+            GROUND - h - 37,
+            45,
+            h,
+            "#11131b"
         );
 
+        if (i % 3 === 0) {
+            rect(
+                x + 20,
+                GROUND - h - 46,
+                5,
+                9,
+                "#10121a"
+            );
+        }
+
         for (
-            let y =
-                world.ground -
-                height +
-                24;
+            let wy =
+                GROUND - h - 26;
 
-            y <
-            world.ground -
-            28;
+            wy <
+            GROUND - 52;
 
-            y += 34
+            wy += 11
         ) {
-
             for (
                 let wx =
-                    x + 14;
+                    x + 7;
 
                 wx <
-                x +
-                spacing -
-                36;
+                x + 39;
 
-                wx += 29
+                wx += 11
             ) {
-
                 if (
-                    Math.floor(
-                        wx +
-                        y +
-                        i
-                    ) %
-                    4 !==
-                    0
+                    (
+                        Math.floor(wx + wy + i)
+                        % 5
+                    ) === 0
                 ) {
-
-                    pixelRect(
+                    rect(
                         wx,
-                        y,
-                        6,
-                        10,
-                        "#4a3c3d"
+                        wy,
+                        2,
+                        3,
+                        "#5b4650",
+                        0.6
                     );
                 }
             }
@@ -904,291 +965,578 @@ function drawSkyline(
 }
 
 
-function drawStreet() {
+function drawCathedral() {
+    const x =
+        880 -
+        world.cameraX * 0.18;
 
-    const offset =
-        -world.cameraX;
+    if (
+        x < -300 ||
+        x > W + 300
+    ) {
+        return;
+    }
 
-    const shops = [
+    rect(
+        x,
+        72,
+        84,
+        119,
+        "#17141c"
+    );
 
+    rect(
+        x + 28,
+        38,
+        28,
+        153,
+        "#16131b"
+    );
+
+    poly(
         [
-            240,
-            360,
-            "VIDEO / VHS",
-            "#5b263f"
+            [x + 25, 39],
+            [x + 42, 14],
+            [x + 59, 39]
         ],
+        "#15121a"
+    );
 
-        [
-            900,
-            440,
-            "VOID",
-            "#52294a"
-        ],
+    rect(
+        x + 40,
+        11,
+        4,
+        11,
+        "#15121a"
+    );
 
-        [
-            1600,
-            420,
-            "24 HOUR DELI",
-            "#4d3d25"
-        ],
-
-        [
-            2330,
-            520,
-            "NOCTURNE",
-            "#4b2034"
-        ],
-
-        [
-            3180,
-            650,
-            "THE PIT",
-            "#5a232a"
-        ]
-    ];
-
-    shops.forEach(
-        (
-            [
-                shopX,
-                shopWidth,
-                label,
-                signColor
-            ]
-        ) => {
-
-            const x =
-                shopX +
-                offset;
-
-            if (
-                x >
-                WIDTH + 100 ||
-                x +
-                shopWidth <
-                -100
-            ) {
-                return;
-            }
-
-            pixelRect(
-                x,
-                205,
-                shopWidth,
-                253,
-                "#241d25"
-            );
-
-            pixelRect(
-                x + 10,
-                218,
-                shopWidth - 20,
-                8,
-                "#3c3037"
-            );
-
-            pixelRect(
-                x + 36,
-                278,
-                105,
-                180,
-                "#0b0b10"
-            );
-
-            pixelRect(
-                x + 175,
-                252,
-                142,
-                35,
-                signColor
-            );
-
-            ctx.font =
-                "bold 16px monospace";
-
-            ctx.fillStyle =
-                "#d4b8bf";
-
-            ctx.fillText(
-                label,
-                x + 185,
-                276
-            );
-
-            for (
-                let wx =
-                    x + 170;
-
-                wx <
-                x +
-                shopWidth -
-                40;
-
-                wx += 62
-            ) {
-
-                pixelRect(
-                    wx,
-                    320,
-                    34,
-                    54,
-                    "#101017"
-                );
-
-                pixelRect(
-                    wx + 4,
-                    326,
-                    26,
-                    4,
-                    "#47343d"
-                );
-            }
-        }
+    rect(
+        x + 36,
+        15,
+        12,
+        3,
+        "#15121a"
     );
 
     for (
-        let x = 460;
-        x < world.width;
-        x += 560
+        let yy = 64;
+        yy < 170;
+        yy += 24
     ) {
-
-        const screenX =
-            x +
-            offset;
-
-        pixelRect(
-            screenX,
-            320,
-            8,
-            138,
-            "#2a252d"
+        rect(
+            x + 37,
+            yy,
+            10,
+            18,
+            "#08080d"
         );
 
-        pixelRect(
-            screenX - 4,
-            318,
-            57,
-            5,
-            "#66525b"
+        rect(
+            x + 39,
+            yy + 2,
+            6,
+            14,
+            "#392536",
+            0.48
+        );
+    }
+}
+
+
+function drawMidBuildings() {
+    const shift =
+        world.cameraX * 0.42;
+
+    for (
+        let i = -1;
+        i < 9;
+        i++
+    ) {
+        const x =
+            i * 112 -
+            (shift % 112);
+
+        const h =
+            82 +
+            (
+                (i * 31 + 23) %
+                72
+            );
+
+        rect(
+            x,
+            GROUND - h,
+            101,
+            h,
+            i % 2
+                ? "#211921"
+                : "#1d171e"
+        );
+
+        rect(
+            x + 3,
+            GROUND - h + 5,
+            95,
+            3,
+            "#32232b"
+        );
+
+        for (
+            let yy =
+                GROUND - h + 17;
+
+            yy <
+            GROUND - 24;
+
+            yy += 22
+        ) {
+            for (
+                let xx =
+                    x + 12;
+
+                xx <
+                x + 88;
+
+                xx += 28
+            ) {
+                rect(
+                    xx,
+                    yy,
+                    9,
+                    12,
+                    "#0c0c12"
+                );
+
+                if (
+                    (
+                        Math.floor(
+                            xx + yy + i
+                        )
+                        % 4
+                    ) === 0
+                ) {
+                    rect(
+                        xx + 2,
+                        yy + 2,
+                        5,
+                        8,
+                        "#61444c",
+                        0.42
+                    );
+                }
+            }
+        }
+
+        if (i % 2 === 0) {
+            for (
+                let yy =
+                    GROUND - h + 28;
+
+                yy <
+                GROUND - 40;
+
+                yy += 31
+            ) {
+                rect(
+                    x + 76,
+                    yy,
+                    28,
+                    2,
+                    "#4b3b42"
+                );
+
+                rect(
+                    x + 95,
+                    yy,
+                    2,
+                    20,
+                    "#44343b"
+                );
+
+                rect(
+                    x + 79,
+                    yy,
+                    2,
+                    13,
+                    "#44343b"
+                );
+            }
+        }
+    }
+}
+
+
+function storefront(
+    worldX,
+    width,
+    label,
+    signColor,
+    windowColor
+) {
+    const x =
+        worldX -
+        world.cameraX;
+
+    if (
+        x > W + 80 ||
+        x + width < -80
+    ) {
+        return;
+    }
+
+    rect(
+        x,
+        143,
+        width,
+        GROUND - 143,
+        "#211920"
+    );
+
+    rect(
+        x + 3,
+        149,
+        width - 6,
+        3,
+        "#39272f"
+    );
+
+    rect(
+        x + 12,
+        183,
+        31,
+        46,
+        "#0b0b0e"
+    );
+
+    rect(
+        x + 16,
+        187,
+        23,
+        37,
+        windowColor,
+        0.22
+    );
+
+    rect(
+        x + 49,
+        171,
+        width - 57,
+        25,
+        "#0d0c10"
+    );
+
+    rect(
+        x + 53,
+        175,
+        width - 65,
+        17,
+        signColor
+    );
+
+    text(
+        label,
+        x + width / 2,
+        187,
+        "#e0c9cd",
+        8,
+        "center"
+    );
+
+
+    rect(
+        x + 53,
+        GROUND + 2,
+        width - 65,
+        22,
+        signColor,
+        0.08
+    );
+
+    rect(
+        x + 57,
+        GROUND + 2,
+        width - 73,
+        12,
+        signColor,
+        0.06
+    );
+}
+
+
+function drawStreetDetails() {
+    storefront(
+        125,
+        190,
+        "VIDEO / VHS",
+        "#66223e",
+        "#30233d"
+    );
+
+    storefront(
+        470,
+        210,
+        "VOID",
+        "#452c65",
+        "#28224b"
+    );
+
+    storefront(
+        810,
+        240,
+        "24 HOUR DELI",
+        "#765525",
+        "#58441f"
+    );
+
+    storefront(
+        1180,
+        260,
+        "NOCTURNE",
+        "#711c45",
+        "#391d36"
+    );
+
+    storefront(
+        1695,
+        315,
+        "THE PIT",
+        "#711d29",
+        "#4f1724"
+    );
+
+
+    for (
+        let wx = 340;
+        wx < WORLD_W;
+        wx += 310
+    ) {
+        const x =
+            wx -
+            world.cameraX;
+
+        rect(
+            x,
+            164,
+            3,
+            65,
+            "#302932"
+        );
+
+        rect(
+            x - 2,
+            162,
+            25,
+            3,
+            "#51424a"
+        );
+
+        rect(
+            x + 18,
+            165,
+            6,
+            6,
+            "#756169"
+        );
+
+        rect(
+            x + 19,
+            171,
+            4,
+            16,
+            "#44343d",
+            0.45
         );
     }
 
-    pixelRect(
+
+    const hydrants = [
+        715,
+        1100,
+        1570,
+        2050
+    ];
+
+    hydrants.forEach(wx => {
+        const x =
+            wx -
+            world.cameraX;
+
+        rect(
+            x,
+            GROUND - 13,
+            5,
+            13,
+            "#55222c"
+        );
+
+        rect(
+            x - 2,
+            GROUND - 11,
+            9,
+            3,
+            "#672936"
+        );
+
+        rect(
+            x - 1,
+            GROUND - 15,
+            7,
+            3,
+            "#672936"
+        );
+    });
+}
+
+
+function drawGround() {
+    rect(
         0,
-        world.ground,
-        WIDTH,
-        HEIGHT -
-        world.ground,
-        "#17151a"
+        GROUND,
+        W,
+        H - GROUND,
+        "#111015"
     );
 
-    pixelRect(
+    rect(
         0,
-        world.ground,
-        WIDTH,
-        7,
-        "#30252d"
+        GROUND,
+        W,
+        3,
+        "#34272e"
     );
+
+    for (
+        let i = 0;
+        i < 22;
+        i++
+    ) {
+        const x =
+            (
+                i * 41 -
+                world.cameraX * 0.7
+            ) %
+            520;
+
+        rect(
+            x,
+            GROUND + 11 + (i % 3) * 7,
+            18 + (i % 4) * 5,
+            1,
+            "#2d2429",
+            0.7
+        );
+    }
+
+    for (
+        let i = 0;
+        i < 8;
+        i++
+    ) {
+        const x =
+            (
+                i * 89 -
+                world.cameraX * 0.8
+            ) %
+            560;
+
+        rect(
+            x,
+            GROUND + 4,
+            26,
+            7,
+            "#1e1820",
+            0.78
+        );
+
+        rect(
+            x + 5,
+            GROUND + 5,
+            15,
+            1,
+            "#73515d",
+            0.22
+        );
+    }
+}
+
+
+function drawFog() {
+    for (
+        let i = 0;
+        i < 13;
+        i++
+    ) {
+        const x =
+            (
+                i * 54 +
+                Math.sin(
+                    world.fog +
+                    i
+                ) * 22 -
+                world.cameraX * 0.11
+            ) %
+            650;
+
+        rect(
+            x,
+            GROUND - 15 + (i % 4) * 4,
+            60 + (i % 5) * 10,
+            4,
+            "#817482",
+            0.035
+        );
+    }
 }
 
 
 function drawBackground() {
+    drawSky();
+    drawFarCity();
+    drawCathedral();
+    drawMidBuildings();
+    drawStreetDetails();
+    drawGround();
+    drawFog();
+}
 
-    const gradient =
-        ctx.createLinearGradient(
-            0,
-            0,
-            0,
-            HEIGHT
-        );
 
-    gradient.addColorStop(
-        0,
-        "#070812"
+function drawCoat(
+    x,
+    y,
+    swing = 0
+) {
+    poly(
+        [
+            [x + 6, y + 20],
+            [x + 18, y + 20],
+            [x + 21, y + 45],
+            [x + 17 + swing, y + 51],
+            [x + 12, y + 43],
+            [x + 6 - swing, y + 51],
+            [x + 3, y + 44]
+        ],
+        "#17131b"
     );
 
-    gradient.addColorStop(
-        0.55,
-        "#11101b"
+    rect(
+        x + 7,
+        y + 21,
+        10,
+        25,
+        "#211922"
     );
 
-    gradient.addColorStop(
-        1,
-        "#21151a"
+    rect(
+        x + 8,
+        y + 22,
+        2,
+        22,
+        "#4d2838"
     );
-
-    ctx.fillStyle =
-        gradient;
-
-    ctx.fillRect(
-        0,
-        0,
-        WIDTH,
-        HEIGHT
-    );
-
-    const moonX =
-        780 -
-        world.cameraX *
-        0.05;
-
-    ctx.fillStyle =
-        "#b8afb4";
-
-    ctx.beginPath();
-
-    ctx.arc(
-        moonX,
-        80,
-        38,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.fillStyle =
-        "#0c0d16";
-
-    ctx.beginPath();
-
-    ctx.arc(
-        moonX + 15,
-        68,
-        35,
-        0,
-        Math.PI * 2
-    );
-
-    ctx.fill();
-
-    drawSkyline(
-        0.1,
-        "#10121a",
-        135,
-        120
-    );
-
-    drawSkyline(
-        0.2,
-        "#171722",
-        205,
-        145
-    );
-
-    drawSkyline(
-        0.34,
-        "#211a23",
-        260,
-        180
-    );
-
-    drawStreet();
 }
 
 
 function drawPlayer() {
-
     let x =
         Math.round(
             player.x -
@@ -1196,24 +1544,38 @@ function drawPlayer() {
         );
 
     let y =
-        Math.round(
-            player.y
-        );
+        Math.round(player.y);
 
-    y +=
-        player.grounded
+    if (
+        x < -80 ||
+        x > W + 80
+    ) {
+        return;
+    }
+
+    const walk =
+        player.state === "walk"
             ? Math.sin(
-                player.anim * 2
-            ) *
-            (
-                Math.abs(
-                    player.vx
-                ) >
-                0.7
-                    ? 2
-                    : 1
+                player.anim * 2.1
             )
             : 0;
+
+    const breathe =
+        player.state === "idle"
+            ? Math.round(
+                Math.sin(
+                    player.anim * 0.8
+                )
+            )
+            : 0;
+
+    const coatSwing =
+        Math.round(
+            Math.sin(
+                player.anim * 1.4
+            ) * 2
+        );
+
 
     ctx.save();
 
@@ -1221,307 +1583,625 @@ function drawPlayer() {
         player.inv > 0 &&
         player.inv % 8 < 4
     ) {
-
-        ctx.globalAlpha =
-            0.45;
+        ctx.globalAlpha = 0.48;
     }
 
-    if (
-        player.facing < 0
-    ) {
 
+    if (player.facing < 0) {
         ctx.translate(
-            x +
-            player.w / 2,
+            x + player.w / 2,
             0
         );
 
-        ctx.scale(
-            -1,
-            1
-        );
+        ctx.scale(-1, 1);
 
         ctx.translate(
-            -(
-                x +
-                player.w / 2
-            ),
+            -(x + player.w / 2),
             0
         );
     }
 
 
-    pixelRect(
+    rect(
         x + 3,
-        world.ground - 6,
-        44,
-        6,
-        "#050507"
+        GROUND - 2,
+        22,
+        2,
+        "#020204",
+        0.55
     );
 
 
-    const walkSwing =
+    if (player.dash > 0) {
+        rect(
+            x - 10,
+            y + 7,
+            18,
+            37,
+            "#6d1e3c",
+            0.15
+        );
+
+        rect(
+            x - 18,
+            y + 12,
+            14,
+            29,
+            "#732443",
+            0.08
+        );
+    }
+
+
+    drawCoat(
+        x,
+        y + breathe,
+        coatSwing
+    );
+
+
+    const legShift =
         Math.round(
-            Math.sin(
-                player.anim * 1.7
-            ) *
-            3
+            walk * 2.2
         );
 
 
-    pixelRect(
-        x + 5,
-        y + 42,
-        9,
-        41 +
-        walkSwing,
-        "#18131b"
-    );
-
-    pixelRect(
-        x + 31,
-        y + 42,
-        9,
-        41 -
-        walkSwing,
-        "#18131b"
-    );
-
-
-    pixelRect(
-        x + 4,
-        y + 73,
-        14,
-        23,
-        "#111015"
-    );
-
-    pixelRect(
-        x + 27,
-        y + 73,
-        14,
-        23,
-        "#111015"
-    );
-
-
-    pixelRect(
-        x + 7,
-        y + 58,
-        11,
-        23,
-        "#29222b"
-    );
-
-    pixelRect(
-        x + 27,
-        y + 58,
-        11,
-        23,
-        "#29222b"
-    );
-
-
-    pixelRect(
+    rect(
         x + 6,
-        y + 26,
-        34,
-        36,
-        "#b19a96"
+        y + 37,
+        5,
+        11 + legShift,
+        "#17141a"
+    );
+
+    rect(
+        x + 14,
+        y + 37,
+        5,
+        11 - legShift,
+        "#17141a"
     );
 
 
-    pixelRect(
-        x + 11,
-        y + 24,
-        24,
-        39,
-        "#1a171d"
+    rect(
+        x + 4,
+        y + 47 + legShift,
+        8,
+        5,
+        "#0b0a0d"
+    );
+
+    rect(
+        x + 13,
+        y + 47 - legShift,
+        8,
+        5,
+        "#0b0a0d"
     );
 
 
-    pixelRect(
-        x - 2,
-        y + 31,
-        11,
-        31,
-        "#bca5a0"
-    );
-
-    pixelRect(
-        x + 36,
-        y + 31,
-        11,
-        31,
-        "#bca5a0"
+    rect(
+        x + 5,
+        y + 17 + breathe,
+        15,
+        22,
+        "#b7a19e"
     );
 
 
-    pixelRect(
-        x,
-        y + 38,
-        7,
-        3,
-        "#3a2d39"
-    );
-
-    pixelRect(
-        x + 38,
-        y + 39,
-        7,
-        3,
-        "#3a2d39"
-    );
-
-
-    pixelRect(
-        x + 11,
-        y + 3,
-        24,
-        24,
-        "#c9b5b0"
-    );
-
-
-    pixelRect(
-        x + 8,
-        y,
-        30,
-        9,
-        "#151218"
-    );
-
-    pixelRect(
+    rect(
         x + 7,
-        y + 6,
-        6,
-        20,
-        "#151218"
+        y + 17 + breathe,
+        11,
+        22,
+        "#1b171d"
     );
 
 
-    pixelRect(
-        x + 28,
-        y + 13,
-        4,
+    rect(
+        x + 7,
+        y + 19 + breathe,
+        2,
+        14,
+        "#663147"
+    );
+
+    rect(
+        x + 16,
+        y + 19 + breathe,
+        1,
+        13,
+        "#4d293d"
+    );
+
+
+    rect(
+        x + 1,
+        y + 20 + breathe,
+        5,
+        15,
+        "#bda7a2"
+    );
+
+    rect(
+        x + 19,
+        y + 20 + breathe,
+        5,
+        15,
+        "#bda7a2"
+    );
+
+
+    rect(
+        x + 2,
+        y + 23 + breathe,
+        2,
+        2,
+        "#32232e"
+    );
+
+    rect(
+        x + 2,
+        y + 28 + breathe,
         3,
-        "#d2253d"
+        1,
+        "#32232e"
+    );
+
+    rect(
+        x + 20,
+        y + 24 + breathe,
+        2,
+        2,
+        "#32232e"
+    );
+
+    rect(
+        x + 20,
+        y + 29 + breathe,
+        3,
+        1,
+        "#32232e"
+    );
+
+
+    rect(
+        x + 7,
+        y + 4 + breathe,
+        11,
+        13,
+        "#c7b4af"
+    );
+
+    rect(
+        x + 6,
+        y + 2 + breathe,
+        13,
+        5,
+        "#141118"
+    );
+
+    rect(
+        x + 5,
+        y + 5 + breathe,
+        4,
+        8,
+        "#141118"
+    );
+
+    rect(
+        x + 17,
+        y + 4 + breathe,
+        3,
+        6,
+        "#141118"
+    );
+
+
+    rect(
+        x + 14,
+        y + 10 + breathe,
+        2,
+        1,
+        "#d52b47"
+    );
+
+    rect(
+        x + 13,
+        y + 13 + breathe,
+        3,
+        1,
+        "#775057"
     );
 
 
     if (
         player.attackTimer > 0
     ) {
-
-        if (
-            player.combo === 1
-        ) {
-
-            pixelRect(
-                x + 37,
-                y + 31,
-                35,
-                11,
-                "#c7afaa"
+        if (player.combo === 1) {
+            rect(
+                x + 18,
+                y + 21,
+                17,
+                5,
+                "#c5aca7"
             );
 
-            pixelRect(
-                x + 68,
-                y + 29,
-                12,
-                15,
-                "#151217"
-            );
-        }
-
-        else if (
-            player.combo === 2
-        ) {
-
-            pixelRect(
-                x + 38,
-                y + 25,
-                28,
-                10,
-                "#c7afaa"
-            );
-
-            pixelRect(
-                x + 62,
-                y + 18,
-                13,
-                22,
-                "#151217"
-            );
-
-            pixelRect(
-                x + 9,
-                y + 64,
-                51,
-                8,
-                "#6e3140"
-            );
-        }
-
-        else {
-
-            pixelRect(
-                x + 35,
-                y + 36,
-                42,
-                13,
-                "#c7afaa"
-            );
-
-            pixelRect(
-                x + 72,
-                y + 32,
-                13,
-                18,
-                "#151217"
-            );
-
-            pixelRect(
-                x + 20,
-                y + 16,
+            rect(
+                x + 31,
+                y + 20,
                 6,
-                52,
-                "#79263a"
+                7,
+                "#18131a"
+            );
+        }
+
+        if (player.combo === 2) {
+            rect(
+                x + 18,
+                y + 17,
+                14,
+                5,
+                "#c5aca7"
+            );
+
+            rect(
+                x + 29,
+                y + 12,
+                6,
+                10,
+                "#18131a"
+            );
+
+            rect(
+                x + 7,
+                y + 34,
+                24,
+                3,
+                "#6c263d"
+            );
+        }
+
+        if (player.combo === 3) {
+            rect(
+                x + 18,
+                y + 23,
+                22,
+                6,
+                "#c5aca7"
+            );
+
+            rect(
+                x + 36,
+                y + 20,
+                7,
+                10,
+                "#18131a"
+            );
+
+            rect(
+                x + 10,
+                y + 13,
+                3,
+                27,
+                "#8a2941"
             );
         }
     }
 
-
-    if (
-        player.dash > 0
-    ) {
-
-        ctx.globalAlpha =
-            0.25;
-
-        pixelRect(
-            x - 26,
-            y + 15,
-            34,
-            68,
-            "#8d263f"
-        );
-
-        pixelRect(
-            x - 45,
-            y + 25,
-            22,
-            52,
-            "#5d1f36"
-        );
-    }
 
     ctx.restore();
 }
 
 
-function drawEnemy(enemy) {
+function drawThug(enemy, x, y) {
+    const bounce =
+        Math.round(
+            Math.sin(
+                enemy.anim * 2
+            )
+        );
 
+    rect(
+        x + 5,
+        y + 25,
+        5,
+        17,
+        "#17171a"
+    );
+
+    rect(
+        x + 14,
+        y + 25,
+        5,
+        17,
+        "#17171a"
+    );
+
+    rect(
+        x + 3,
+        y + 13 + bounce,
+        18,
+        22,
+        enemy.hurt
+            ? "#d0b4b4"
+            : "#43504b"
+    );
+
+    rect(
+        x + 5,
+        y + 15 + bounce,
+        14,
+        4,
+        "#27312e"
+    );
+
+    rect(
+        x + 6,
+        y + 3 + bounce,
+        12,
+        11,
+        "#9b8581"
+    );
+
+    rect(
+        x + 8,
+        y + bounce,
+        7,
+        4,
+        "#1c1519"
+    );
+
+    rect(
+        x + 11,
+        y - 3 + bounce,
+        2,
+        4,
+        "#711d32"
+    );
+
+    rect(
+        x + 15,
+        y + 8 + bounce,
+        2,
+        1,
+        "#c05058"
+    );
+
+    rect(
+        x + 19,
+        y + 19 + bounce,
+        11,
+        2,
+        "#6d6256"
+    );
+
+    rect(
+        x + 27,
+        y + 17 + bounce,
+        2,
+        8,
+        "#3a3430"
+    );
+}
+
+
+function drawHunter(enemy, x, y) {
+    const sway =
+        Math.round(
+            Math.sin(enemy.anim) * 1
+        );
+
+    poly(
+        [
+            [x + 5, y + 17],
+            [x + 21, y + 17],
+            [x + 24, y + 46],
+            [x + 14, y + 40],
+            [x + 3, y + 46]
+        ],
+        enemy.hurt
+            ? "#d3c1c3"
+            : "#414252"
+    );
+
+    rect(
+        x + 6,
+        y + 31,
+        5,
+        17,
+        "#17171d"
+    );
+
+    rect(
+        x + 16,
+        y + 31,
+        5,
+        17,
+        "#17171d"
+    );
+
+    rect(
+        x + 7,
+        y + 5 + sway,
+        13,
+        12,
+        "#b4a5a0"
+    );
+
+    rect(
+        x + 5,
+        y + 3 + sway,
+        17,
+        4,
+        "#1a1720"
+    );
+
+    rect(
+        x + 9,
+        y + sway,
+        9,
+        4,
+        "#1a1720"
+    );
+
+    rect(
+        x + 16,
+        y + 10 + sway,
+        2,
+        1,
+        "#d7a564"
+    );
+
+    rect(
+        x + 20,
+        y + 20 + sway,
+        15,
+        3,
+        "#8c826d"
+    );
+
+    rect(
+        x + 31,
+        y + 17 + sway,
+        4,
+        8,
+        "#332e31"
+    );
+}
+
+
+function drawBoss(enemy, x, y) {
+    const pulse =
+        Math.round(
+            Math.sin(
+                enemy.anim * 1.3
+            )
+        );
+
+    rect(
+        x + 8,
+        y + 43,
+        10,
+        26,
+        "#171318"
+    );
+
+    rect(
+        x + 26,
+        y + 43,
+        10,
+        26,
+        "#171318"
+    );
+
+
+    rect(
+        x + 3,
+        y + 18 + pulse,
+        37,
+        38,
+        enemy.hurt
+            ? "#d2afb0"
+            : "#713744"
+    );
+
+    rect(
+        x,
+        y + 24 + pulse,
+        8,
+        29,
+        "#8f4852"
+    );
+
+    rect(
+        x + 37,
+        y + 24 + pulse,
+        8,
+        29,
+        "#8f4852"
+    );
+
+
+    rect(
+        x + 9,
+        y + 4 + pulse,
+        26,
+        17,
+        "#b8a29d"
+    );
+
+    rect(
+        x + 8,
+        y + 2 + pulse,
+        28,
+        8,
+        "#292126"
+    );
+
+
+    rect(
+        x + 12,
+        y + 8 + pulse,
+        19,
+        9,
+        "#d6c3bd"
+    );
+
+    rect(
+        x + 15,
+        y + 11 + pulse,
+        3,
+        2,
+        "#2d292a"
+    );
+
+    rect(
+        x + 27,
+        y + 11 + pulse,
+        3,
+        2,
+        "#dc3347"
+    );
+
+
+    rect(
+        x + 39,
+        y + 28 + pulse,
+        23,
+        5,
+        "#4c4440"
+    );
+
+    poly(
+        [
+            [x + 57, y + 22],
+            [x + 69, y + 28],
+            [x + 61, y + 39],
+            [x + 52, y + 34]
+        ],
+        "#8a8178"
+    );
+
+    rect(
+        x + 10,
+        y + 28 + pulse,
+        20,
+        3,
+        "#9d4c57"
+    );
+
+    rect(
+        x + 11,
+        y + 34 + pulse,
+        18,
+        2,
+        "#54212e"
+    );
+}
+
+
+function drawEnemy(enemy) {
     if (!enemy.alive) {
         return;
     }
@@ -1533,146 +2213,78 @@ function drawEnemy(enemy) {
         );
 
     const y =
-        Math.round(
-            enemy.y
-        );
+        Math.round(enemy.y);
 
     if (
-        x < -120 ||
-        x >
-        WIDTH + 120
+        x < -100 ||
+        x > W + 100
     ) {
         return;
     }
 
     ctx.save();
 
-
-    if (
-        enemy.facing < 0
-    ) {
-
+    if (enemy.facing < 0) {
         ctx.translate(
-            x +
-            enemy.w / 2,
+            x + enemy.w / 2,
             0
         );
 
-        ctx.scale(
-            -1,
-            1
-        );
+        ctx.scale(-1, 1);
 
         ctx.translate(
-            -(
-                x +
-                enemy.w / 2
-            ),
+            -(x + enemy.w / 2),
             0
         );
     }
 
-
-    const bodyColor =
-        enemy.hurt > 0
-            ? "#d7c1bf"
-            : enemy.boss
-                ? "#713440"
-                : enemy.type === "hunter"
-                    ? "#5f6172"
-                    : "#59645f";
-
-
-    pixelRect(
-        x + 5,
-        y + 20,
-        enemy.w - 10,
-        enemy.h - 20,
-        bodyColor
-    );
-
-
-    pixelRect(
-        x + 9,
-        y,
-        enemy.w - 18,
-        24,
-        "#211a21"
-    );
-
-
-    pixelRect(
-        x +
-        enemy.w -
-        14,
-        y + 10,
-        4,
-        3,
-        enemy.boss
-            ? "#ff304c"
-            : "#cf6b72"
-    );
-
-
-    pixelRect(
-        x,
-        y +
-        enemy.h -
-        13,
+    rect(
+        x + 2,
+        GROUND - 2,
         enemy.w,
-        13,
-        "#121116"
+        2,
+        "#020204",
+        0.5
     );
 
-
-    if (enemy.boss) {
-
-        pixelRect(
-            x - 9,
-            y + 24,
-            12,
-            58,
-            "#8c4249"
-        );
-
-        pixelRect(
-            x +
-            enemy.w -
-            3,
-            y + 24,
-            12,
-            58,
-            "#8c4249"
+    if (enemy.type === "thug") {
+        drawThug(
+            enemy,
+            x,
+            y
         );
     }
 
-    else if (
-        enemy.type === "hunter"
-    ) {
-
-        pixelRect(
-            x +
-            enemy.w -
-            5,
-            y + 32,
-            18,
-            5,
-            "#b6a37c"
+    if (enemy.type === "hunter") {
+        drawHunter(
+            enemy,
+            x,
+            y
         );
     }
 
+    if (enemy.type === "boss") {
+        drawBoss(
+            enemy,
+            x,
+            y
+        );
+    }
 
-    pixelRect(
+    ctx.restore();
+
+
+    rect(
         x,
-        y - 11,
+        y - 7,
         enemy.w,
-        4,
-        "#181318"
+        2,
+        "#160b0f"
     );
 
-    pixelRect(
+    rect(
         x,
-        y - 11,
+        y - 7,
         enemy.w *
         clamp(
             enemy.hp /
@@ -1680,74 +2292,137 @@ function drawEnemy(enemy) {
             0,
             1
         ),
-        4,
+        2,
         enemy.boss
-            ? "#a92f3e"
-            : "#7f5861"
+            ? "#b0253d"
+            : "#74505b"
     );
-
-
-    ctx.restore();
 }
 
 
-function drawEffects() {
+function drawSlashes() {
+    slashes.forEach(slash => {
+        const x =
+            slash.x -
+            world.cameraX;
 
-    particles.forEach(
-        particle => {
+        const alpha =
+            slash.life /
+            slash.maxLife;
 
-            const x =
-                particle.x -
-                world.cameraX;
+        ctx.save();
 
-            ctx.globalAlpha =
-                clamp(
-                    particle.life /
-                    particle.maxLife,
-                    0,
-                    1
-                );
+        ctx.globalAlpha =
+            alpha * 0.8;
 
-            const color =
-                particle.type === "blood"
-                    ? "#a51e35"
-                    : particle.type === "spark"
-                        ? "#d6b97a"
-                        : "#5d5060";
+        ctx.strokeStyle =
+            slash.combo === 3
+                ? "#d34561"
+                : "#bba6ae";
 
-            pixelRect(
+        ctx.lineWidth =
+            slash.combo === 3
+                ? 4
+                : 2;
+
+        ctx.beginPath();
+
+        if (slash.facing > 0) {
+            ctx.arc(
                 x,
-                particle.y,
-                particle.type === "spark"
-                    ? 2
-                    : 3,
-                particle.type === "smoke"
-                    ? 5
-                    : 3,
-                color
+                slash.y,
+                slash.combo === 3
+                    ? 28
+                    : 22,
+                -0.9,
+                0.65
+            );
+        }
+        else {
+            ctx.arc(
+                x,
+                slash.y,
+                slash.combo === 3
+                    ? 28
+                    : 22,
+                Math.PI - 0.65,
+                Math.PI + 0.9
+            );
+        }
+
+        ctx.stroke();
+
+        ctx.restore();
+    });
+}
+
+
+function drawParticles() {
+    particles.forEach(p => {
+        const x =
+            p.x -
+            world.cameraX;
+
+        const alpha =
+            clamp(
+                p.life / 24,
+                0,
+                1
             );
 
-            ctx.globalAlpha = 1;
+        if (p.type === "blood") {
+            rect(
+                x,
+                p.y,
+                p.size,
+                p.size,
+                "#9e1f36",
+                alpha
+            );
         }
-    );
+
+        if (p.type === "spark") {
+            rect(
+                x,
+                p.y,
+                1,
+                1,
+                "#d8b86f",
+                alpha
+            );
+        }
+
+        if (p.type === "fog") {
+            rect(
+                x,
+                p.y,
+                p.size,
+                2,
+                "#776a78",
+                alpha * 0.08
+            );
+        }
+    });
+}
 
 
+function drawRain() {
     ctx.strokeStyle =
-        "rgba(170,180,210,.24)";
+        "rgba(161,170,192,.23)";
+
+    ctx.lineWidth = 1;
 
     ctx.beginPath();
 
     rain.forEach(drop => {
-
         ctx.moveTo(
             drop.x,
             drop.y
         );
 
         ctx.lineTo(
-            drop.x - 4,
-            drop.y +
-            drop.len
+            drop.x - 2,
+            drop.y + drop.len
         );
     });
 
@@ -1756,60 +2431,63 @@ function drawEffects() {
 
 
 function drawHud() {
-
-    pixelRect(
-        18,
-        16,
-        315,
-        68,
-        "rgba(4,4,7,.78)"
+    rect(
+        8,
+        8,
+        151,
+        34,
+        "#050507",
+        0.82
     );
 
-
-    ctx.fillStyle =
-        "#eadfe2";
-
-    ctx.font =
-        "bold 17px monospace";
-
-    ctx.fillText(
+    text(
         "THE STRAY",
-        31,
-        40
+        15,
+        19,
+        "#e0d4d7",
+        8
     );
 
-
-    ctx.font =
-        "12px monospace";
-
-    ctx.fillStyle =
-        "#8e7c86";
-
-    ctx.fillText(
-        "Caitiff • Brooklyn, 1996",
-        31,
-        57
+    text(
+        "CAITIFF • BROOKLYN 1996",
+        15,
+        27,
+        "#806a72",
+        5
     );
 
-
-    pixelRect(
-        31,
-        66,
-        260,
-        9,
-        "#24131a"
+    rect(
+        15,
+        32,
+        126,
+        5,
+        "#251219"
     );
 
-    pixelRect(
-        31,
-        66,
-        260 *
+    rect(
+        15,
+        32,
+        126 *
         (
             player.hp /
             player.maxHp
         ),
-        9,
-        "#96263a"
+        5,
+        "#9f263d"
+    );
+
+    rect(
+        15,
+        38,
+        126 *
+        (
+            1 -
+            player.dashCooldown /
+            40
+        ),
+        1,
+        "#604e75",
+        0.85
     );
 
 
@@ -1817,17 +2495,12 @@ function drawHud() {
         player.combo > 0 &&
         player.comboWindow > 0
     ) {
-
-        ctx.fillStyle =
-            "#c9a7b2";
-
-        ctx.font =
-            "bold 13px monospace";
-
-        ctx.fillText(
-            `COMBO ${player.combo}/3`,
-            346,
-            40
+        text(
+            `COMBO ${player.combo}`,
+            169,
+            21,
+            "#bca5ad",
+            7
         );
     }
 
@@ -1839,100 +2512,80 @@ function drawHud() {
                 enemy.alive
         );
 
-
     if (
         boss &&
         Math.abs(
             boss.x -
             player.x
-        ) <
-        720
+        ) < 380
     ) {
-
-        pixelRect(
-            WIDTH / 2 - 235,
-            HEIGHT - 64,
-            470,
-            41,
-            "rgba(4,4,7,.84)"
+        rect(
+            W / 2 - 116,
+            H - 32,
+            232,
+            19,
+            "#050507",
+            0.86
         );
 
-        ctx.textAlign =
-            "center";
-
-        ctx.fillStyle =
-            "#dfd0d2";
-
-        ctx.font =
-            "bold 14px monospace";
-
-        ctx.fillText(
+        text(
             "THE BUTCHER",
-            WIDTH / 2,
-            HEIGHT - 46
-        );
-
-        pixelRect(
-            WIDTH / 2 - 190,
-            HEIGHT - 38,
-            380,
+            W / 2,
+            H - 23,
+            "#d6c5c8",
             7,
-            "#2b1419"
+            "center"
         );
 
-        pixelRect(
-            WIDTH / 2 - 190,
-            HEIGHT - 38,
-            380 *
+        rect(
+            W / 2 - 94,
+            H - 19,
+            188,
+            4,
+            "#251016"
+        );
+
+        rect(
+            W / 2 - 94,
+            H - 19,
+            188 *
             (
                 boss.hp /
                 boss.maxHp
             ),
-            7,
-            "#9d2836"
+            4,
+            "#a52238"
         );
-
-        ctx.textAlign =
-            "left";
     }
 
 
     if (player.dead) {
-
-        pixelRect(
+        rect(
             0,
             0,
-            WIDTH,
-            HEIGHT,
-            "rgba(0,0,0,.74)"
+            W,
+            H,
+            "#000000",
+            0.75
         );
 
-        ctx.textAlign =
-            "center";
-
-        ctx.fillStyle =
-            "#d7c9cc";
-
-        ctx.font =
-            "bold 38px monospace";
-
-        ctx.fillText(
+        text(
             "THE NIGHT CLAIMS YOU",
-            WIDTH / 2,
-            HEIGHT / 2
+            W / 2,
+            H / 2,
+            "#d9c8cb",
+            18,
+            "center"
         );
 
-        ctx.font =
-            "18px monospace";
-
-        ctx.fillText(
-            "Press R to rise again",
-            WIDTH / 2,
-            HEIGHT / 2 + 42
+        text(
+            "PRESS R TO RISE AGAIN",
+            W / 2,
+            H / 2 + 18,
+            "#886c75",
+            7,
+            "center"
         );
-
-        ctx.textAlign =
-            "left";
     }
 
 
@@ -1943,51 +2596,47 @@ function drawHud() {
         ) &&
         !player.dead
     ) {
-
-        pixelRect(
-            WIDTH / 2 - 250,
-            166,
-            500,
-            130,
-            "rgba(0,0,0,.78)"
+        rect(
+            W / 2 - 135,
+            79,
+            270,
+            72,
+            "#050507",
+            0.85
         );
 
-        ctx.textAlign =
-            "center";
-
-        ctx.fillStyle =
-            "#e1d4d6";
-
-        ctx.font =
-            "bold 30px monospace";
-
-        ctx.fillText(
-            "PROTOTYPE 0.2 COMPLETE",
-            WIDTH / 2,
-            215
+        text(
+            "NIGHT BLOOD",
+            W / 2,
+            104,
+            "#e3d5d7",
+            17,
+            "center"
         );
 
-        ctx.font =
-            "16px monospace";
-
-        ctx.fillText(
-            "Brooklyn survives. For now.",
-            WIDTH / 2,
-            252
+        text(
+            "VISUAL PASS I COMPLETE",
+            W / 2,
+            121,
+            "#a67d89",
+            8,
+            "center"
         );
 
-        ctx.textAlign =
-            "left";
+        text(
+            "THE NIGHT IS ONLY BEGINNING",
+            W / 2,
+            137,
+            "#715963",
+            6,
+            "center"
+        );
     }
 }
 
 
 function update() {
-
-    if (
-        world.hitStop > 0
-    ) {
-
+    if (world.hitStop > 0) {
         world.hitStop--;
 
         Object.keys(
@@ -2001,28 +2650,8 @@ function update() {
     }
 
     updatePlayer();
-
     updateEnemies();
-
     updateEffects();
-
-
-    if (
-        world.shake > 0
-    ) {
-
-        world.shake *=
-            0.78;
-    }
-
-
-    if (
-        world.flash > 0
-    ) {
-
-        world.flash--;
-    }
-
 
     Object.keys(
         pressed
@@ -2034,75 +2663,57 @@ function update() {
 
 
 function draw() {
-
     ctx.save();
 
-
-    if (
-        world.shake > 0
-    ) {
-
+    if (world.shake > 0) {
         ctx.translate(
             (
-                Math.random() -
-                0.5
+                Math.random() - 0.5
             ) *
             world.shake,
 
             (
-                Math.random() -
-                0.5
+                Math.random() - 0.5
             ) *
             world.shake
         );
     }
 
-
     drawBackground();
-
 
     enemies.forEach(
         drawEnemy
     );
 
-
     drawPlayer();
 
-
-    drawEffects();
-
+    drawSlashes();
+    drawParticles();
+    drawRain();
 
     ctx.restore();
 
-
     drawHud();
 
-
-    if (
-        world.flash > 0
-    ) {
-
-        pixelRect(
+    if (world.flash > 0) {
+        rect(
             0,
             0,
-            WIDTH,
-            HEIGHT,
-            "rgba(255,220,225,.06)"
+            W,
+            H,
+            "#f2dce1",
+            0.06
         );
     }
 }
 
 
-function gameLoop() {
-
+function loop() {
     update();
-
     draw();
 
-    requestAnimationFrame(
-        gameLoop
-    );
+    requestAnimationFrame(loop);
 }
 
 
-gameLoop();
+loop();

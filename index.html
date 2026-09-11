@@ -19,28 +19,38 @@
 
     <header>
 
-        <div>
+        <div class="brand">
+            <div class="eyebrow">BROOKLYN • 1996</div>
             <h1>NIGHT BLOOD</h1>
-            <p>Prototype 0.2 — Brooklyn, 1996</p>
+            <div class="subtitle">
+                Prototype 0.3 — Visual Pass I / III
+            </div>
         </div>
 
         <div class="controls">
-            MOVE: A/D &nbsp;
-            JUMP: SPACE &nbsp;
-            ATTACK: J &nbsp;
-            DASH: K / SHIFT
+            <span>A / D</span> MOVE
+            <span>SPACE</span> JUMP
+            <span>J</span> ATTACK
+            <span>K / SHIFT</span> DASH
         </div>
 
     </header>
 
-    <canvas
-        id="game"
-        width="960"
-        height="540"
-    ></canvas>
+    <main>
+        <div id="canvas-frame">
+            <canvas
+                id="game"
+                width="480"
+                height="270"
+            ></canvas>
+
+            <div class="scanlines"></div>
+            <div class="vignette"></div>
+        </div>
+    </main>
 
     <footer>
-        Original browser prototype • Gothic urban pixel-art metroidvania
+        Original gothic urban pixel-art prototype
     </footer>
 
 </div>
